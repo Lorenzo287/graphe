@@ -1,0 +1,50 @@
+cmake_minimum_required(VERSION 3.20)
+
+project(graphe LANGUAGES C)
+
+set(CMAKE_C_STANDARD 99)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_C_EXTENSIONS OFF)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Debug CACHE STRING "Build type" FORCE)
+endif()
+
+option(GRAPHE_FETCH_RAYLIB "Fetch raylib with CMake when no system package is found" ON)
+
+find_package(raylib QUIET)
+
+if(NOT raylib_FOUND)
+    if(NOT GRAPHE_FETCH_RAYLIB)
+        message(FATAL_ERROR "raylib was not found. Install raylib or configure with -DGRAPHE_FETCH_RAYLIB=ON.")
+    endif()
+
+    include(FetchContent)
+    set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(BUILD_GAMES OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+        raylib
+        URL https://github.com/raysan5/raylib/archive/refs/tags/5.5.tar.gz
+        URL_HASH SHA256=aea98ecf5bc5c5e0b789a76de0083a21a70457050ea4cc2aec7566935f5e258e
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    )
+    FetchContent_MakeAvailable(raylib)
+endif()
+
+add_executable(graphe
+    src/dfs.c
+    src/graph.c
+    src/layout.c
+    src/main.c
+    src/render.c
+)
+
+target_include_directories(graphe PRIVATE src)
+target_link_libraries(graphe PRIVATE raylib)
+
+if(MSVC)
+    target_compile_options(graphe PRIVATE /W4)
+else()
+    target_compile_options(graphe PRIVATE -Wall -Wextra -pedantic)
+endif()
