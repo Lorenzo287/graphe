@@ -1,5 +1,7 @@
 # Graphe
 
+> *γραφή* (*graphê*): writing, drawing, a traced line.
+
 Graphe is a small C/raylib project for visualizing graph algorithms. The first
 goal is an interactive DFS visualizer that shows node colors, discovery and
 finish times, active traversal events, and directed edge classifications.
