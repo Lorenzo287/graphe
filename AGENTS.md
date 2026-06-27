@@ -1,8 +1,9 @@
 # Graphe: Agent Manual
 
-Graphe is a C/raylib educational visualizer for graph algorithms. The first
-target is an interactive DFS visualizer with discovery and finish times,
-color-coded nodes, and classified directed edges.
+Graphe is a C/raylib educational visualizer for graph algorithms. It started as
+an interactive DFS visualizer and now also includes BFS and tree traversal modes
+with discovery and finish times, color-coded nodes, and classified directed
+edges where the selected algorithm produces them.
 
 This file is for AI agents and maintainers working inside the repository. Keep
 public usage information in `README.md`; keep internal workflow, architecture,
@@ -23,9 +24,11 @@ and verification guidance here.
 - `docs/ROADMAP.md`: current plan and next steps.
 - `src/main.c`: raylib application loop, playback controls, and input handling.
 - `src/graph.*`: graph storage, visual state, labels, and sample graph setup.
-- `src/dfs.*`: DFS traversal and event trace generation/application.
+- `src/dfs.*`: traversal event trace generation/application for DFS, BFS, and
+  tree traversal.
 - `src/layout.*`: graph layout helpers.
 - `src/render.*`: raylib drawing code for nodes, edges, labels, and UI text.
+- `src/raygui_impl.c`: single raygui implementation translation unit.
 
 ## Fast Context
 
@@ -78,7 +81,8 @@ and verification guidance here.
 ## Project Rules
 
 - Language/runtime versions: C99 for project code.
-- Graphics dependency: raylib, linked through CMake. Use plain C APIs first.
+- Graphics dependencies: raylib for drawing/input/windowing and raygui for
+  runtime controls, linked through CMake. Use plain C APIs first.
 - Formatting command: `clang-format -i src/*.c src/*.h` when a formatting pass
   is useful. Treat `.clang-format` as the style reference, not as a reason for
   unrelated formatting churn.
@@ -90,29 +94,30 @@ and verification guidance here.
   -DCMAKE_C_COMPILER=gcc -DCMAKE_BUILD_TYPE=Release` then
   `cmake --build build/gcc-release`.
 - Editor support: CMake exports `compile_commands.json`; `.clangd` points clangd
-  at `build/debug`.
+  at `build/gcc-debug`.
 - Naming and style: use `graphe_` or module-local names for new public helpers;
   keep structs and enums explicit and small. Use attached braces and declare
   local variables near first use.
-- Architecture boundaries: DFS should produce/apply events without depending on
-  raylib. Rendering should consume graph state and trace data, not run the
-  traversal.
+- Architecture boundaries: traversal algorithms should produce/apply events
+  without depending on raylib. Rendering should consume graph state and trace
+  data, not run the traversal.
 - Dependency policy: avoid extra dependencies unless they clearly support the
-  visualizer. Graphviz may be added later as an optional layout helper, not as
-  the primary renderer.
+  visualizer. raygui is the current UI helper. Graphviz may be added later as an
+  optional layout helper, not as the primary renderer.
 - Generated-file policy: do not commit `build/`, compiled binaries, or fetched
   dependency trees.
 
 ## Design Philosophy
 
 - Keep algorithm state separate from rendering state so DFS, BFS, tree
-  traversal, and future renderers can share the same event model.
+  traversal, future algorithms, and future renderers can share the same event
+  model.
 - Prefer simple visible progress over premature graphics complexity. Start with
   clear circles, lines, labels, and controls; add curves, physics, and Graphviz
   layout after the basic visualizer is solid.
 - Make each animation frame explainable: node colors, edge colors, active event,
-  discovery times, finish times, and playback controls should agree with the DFS
-  trace.
+  discovery times, finish times, and playback controls should agree with the
+  selected traversal trace.
 
 ## Verification
 

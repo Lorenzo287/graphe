@@ -2,9 +2,10 @@
 
 > *γραφή* (*graphê*): writing, drawing, a traced line.
 
-Graphe is a small C/raylib project for visualizing graph algorithms. The first
-goal is an interactive DFS visualizer that shows node colors, discovery and
-finish times, active traversal events, and directed edge classifications.
+Graphe is a small C/raylib project for visualizing graph algorithms. It started
+as a DFS visualizer and now supports DFS, BFS, and tree traversal modes with node
+colors, discovery and finish times, active traversal events, and color-coded
+edges.
 
 The project is intentionally low-level enough to be educational: it uses a
 native event loop, per-frame drawing, simple geometry, and explicit algorithm
@@ -15,11 +16,15 @@ state instead of a web framework or a full game engine.
 The initial version contains:
 
 - a hardcoded sample directed graph;
-- a DFS trace with discover, examine edge, classify edge, and finish events;
+- a traversal trace with discover, examine edge, classify edge, and finish
+  events;
 - color-coded nodes and edges;
 - keyboard playback controls;
 - draggable nodes;
-- a simple circular layout.
+- dark and light themes;
+- DFS, BFS, and tree traversal modes;
+- circular, manual, and traversal-forest layouts;
+- alphabetical traversal order by default.
 
 ## Build
 
@@ -29,7 +34,8 @@ Requirements:
 - Ninja;
 - GCC through MinGW/UCRT for the default build commands;
 - raylib, either installed on the system or fetched into the build directory by
-  CMake.
+  CMake;
+- raygui, fetched into the build directory by CMake.
 
 Configure and build a debug executable:
 
@@ -63,16 +69,40 @@ clangd to resolve project includes and compiler flags.
 
 ## Controls
 
-- `Space`: play or pause the DFS trace.
+- `Space`: play or pause the traversal trace.
 - `Right`: step forward.
 - `Left`: step backward.
-- `Home`: jump to the beginning.
-- `End`: jump to the end.
-- `R`: reset the circular layout.
+- `0`: jump to the beginning.
+- `Enter`: jump to the end.
+- `R`: reset the current layout.
+- `Tab`: open or close settings.
+- `M`: cycle algorithm mode.
+- `T`: toggle dark mode.
+- `L`: cycle layout mode.
+- `A`: toggle alphabetical traversal order.
+- `Ctrl` + `+` / `Ctrl` + `-`: scale the interface.
+- `Ctrl` + mouse wheel: scale the interface.
 - Left mouse drag: move a node.
+- Left mouse drag on the graph background: pan the canvas.
+- Mouse wheel over the graph: zoom the canvas.
+
+Dragging a node switches the layout mode to manual.
+
+## Fonts
+
+The app bundles Atkinson Hyperlegible under `assets/fonts/` and loads it before
+falling back to common system fonts such as Segoe UI on Windows or DejaVu Sans
+on Linux. If no TrueType font is found, it uses raylib's default font.
+
+## Window Icon
+
+The app sets a small generated graph icon at runtime. To override it, place a
+PNG at `assets/icons/graphe.png`; raylib will use it for the running window's
+titlebar and taskbar icon. Embedding an icon into the `.exe` file itself is a
+separate Windows resource step.
 
 ## Direction
 
-The code separates the DFS event trace from rendering. That should make it
-reasonable to add BFS, tree traversal, Graphviz-assisted layout, or a different
-renderer later without rewriting the algorithm core.
+The code separates the traversal event trace from rendering. That should make it
+reasonable to add more graph algorithms, Graphviz-assisted layout, or a
+different renderer later without rewriting the rendering core.

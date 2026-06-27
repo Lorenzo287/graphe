@@ -32,19 +32,31 @@ if(NOT raylib_FOUND)
     FetchContent_MakeAvailable(raylib)
 endif()
 
+include(FetchContent)
+FetchContent_Declare(
+    raygui
+    URL https://github.com/raysan5/raygui/archive/refs/tags/4.0.tar.gz
+    URL_HASH SHA256=299c8fcabda68309a60dc858741b76c32d7d0fc533cdc2539a55988cee236812
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+)
+FetchContent_MakeAvailable(raygui)
+
 add_executable(graphe
     src/dfs.c
     src/graph.c
     src/layout.c
     src/main.c
+    src/raygui_impl.c
     src/render.c
 )
 
-target_include_directories(graphe PRIVATE src)
+target_include_directories(graphe PRIVATE src ${raygui_SOURCE_DIR}/src)
 target_link_libraries(graphe PRIVATE raylib)
 
 if(MSVC)
+    set_source_files_properties(src/raygui_impl.c PROPERTIES COMPILE_OPTIONS /w)
     target_compile_options(graphe PRIVATE /W4)
 else()
+    set_source_files_properties(src/raygui_impl.c PROPERTIES COMPILE_OPTIONS -w)
     target_compile_options(graphe PRIVATE -Wall -Wextra -pedantic)
 endif()
