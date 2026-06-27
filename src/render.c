@@ -1,6 +1,7 @@
 #include "render.h"
 
 #include "raygui.h"
+#include "raylib.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -57,7 +58,7 @@ static Theme dark_theme(void) {
         .panel = {31, 41, 55, 255},
         .panel_border = {75, 85, 99, 255},
         .text = {243, 244, 246, 255},
-        .muted_text = {156, 163, 175, 255},
+        .muted_text = {176, 183, 195, 255},
         .node_white = {243, 244, 246, 255},
         .node_gray = {245, 158, 11, 255},
         .node_black = {55, 65, 81, 255},
@@ -337,7 +338,7 @@ static void draw_edge(const Graph *graph, size_t edge_index, int active,
     Vector2 end =
         vector_subtract(end_center, vector_scale(direction, GRAPHE_NODE_RADIUS));
     Color color = active ? theme->active : edge_color(theme, edge->type);
-    float thickness = active ? 5.0f : 3.0f;
+    float thickness = active ? 5.0f : 2.5f;
     float bend = active && edge->type == EDGE_UNCLASSIFIED
                      ? 0.0f
                      : edge_bend_amount(edge->type, distance);
@@ -374,10 +375,10 @@ static void draw_time_label(const RenderResources *resources, const Node *node,
         snprintf(finish, sizeof(finish), "-");
     }
 
-    snprintf(times, sizeof(times), "d:%s f:%s", discover, finish);
-    Vector2 size = measure_text(resources, times, 12.0f);
+    snprintf(times, sizeof(times), "%s %s", discover, finish);
+    Vector2 size = measure_text(resources, times, 15.0f);
     draw_text(resources, times, (Vector2){node->x - size.x * 0.5f, node->y + 7.0f},
-              12.0f, color);
+              15.0f, color);
 }
 
 static void draw_node(const RenderResources *resources, const Node *node, int active,
@@ -392,9 +393,14 @@ static void draw_node(const RenderResources *resources, const Node *node, int ac
     time_color.a = 220;
 
     DrawCircleV(center, GRAPHE_NODE_RADIUS, fill);
-    DrawCircleLinesV(center, GRAPHE_NODE_RADIUS, outline);
-    DrawCircleLinesV(center, GRAPHE_NODE_RADIUS - 1.0f, outline);
-    if (active) DrawCircleLinesV(center, GRAPHE_NODE_RADIUS + 5.0f, theme->active);
+    DrawRing(center, GRAPHE_NODE_RADIUS - 2.5f, GRAPHE_NODE_RADIUS, 0, 360, 64,
+             outline);
+    // DrawCircleLinesV(center, GRAPHE_NODE_RADIUS, outline);
+    // DrawCircleLinesV(center, GRAPHE_NODE_RADIUS - 1.0f, outline);
+    if (active)
+        DrawRing(center, GRAPHE_NODE_RADIUS - 2.5f + 5.0f, GRAPHE_NODE_RADIUS + 4.0f,
+                 0, 360, 64, theme->active);
+    // DrawCircleLinesV(center, GRAPHE_NODE_RADIUS + 5.0f, theme->active);
 
     draw_text(
         resources, node->label,
@@ -721,7 +727,7 @@ static RenderUiResult draw_sidebar(const Graph *graph, const Trace *trace,
     DrawLine((int)sidebar_left(options), 0, (int)sidebar_left(options),
              GetScreenHeight(), theme->panel_border);
 
-    draw_text(resources, "Graphe", (Vector2){x, y}, ui_size(options, 28.0f),
+    draw_text(resources, "Graphe", (Vector2){x, y}, ui_size(options, 30.0f),
               theme->text);
 
     if (GuiButton(settings_button_rect(options),
@@ -731,47 +737,47 @@ static RenderUiResult draw_sidebar(const Graph *graph, const Trace *trace,
     }
 
     draw_text(resources, algorithm_text, (Vector2){x, y + line * 1.8f},
-              ui_size(options, 16.0f), theme->muted_text);
+              ui_size(options, 19.0f), theme->muted_text);
     draw_text(resources, progress, (Vector2){x, y + line * 2.65f},
-              ui_size(options, 18.0f), theme->muted_text);
+              ui_size(options, 19.0f), theme->muted_text);
     draw_text(resources, event_text, (Vector2){x, y + line * 3.55f},
-              ui_size(options, 18.0f), theme->text);
-    draw_text(resources, layout_text, (Vector2){x, y + line * 4.55f},
-              ui_size(options, 16.0f), theme->muted_text);
+              ui_size(options, 19.0f), theme->text);
+    draw_text(resources, layout_text, (Vector2){x, y + line * 4.45f},
+              ui_size(options, 19.0f), theme->muted_text);
     draw_text(resources, scale_text, (Vector2){x, y + line * 5.35f},
-              ui_size(options, 16.0f), theme->muted_text);
+              ui_size(options, 19.0f), theme->muted_text);
 
     draw_text(resources, "Controls", (Vector2){x, y + line * 6.85f},
-              ui_size(options, 21.0f), theme->text);
+              ui_size(options, 22.0f), theme->text);
     draw_text(resources, "Space: play / pause", (Vector2){x, y + line * 7.85f},
-              ui_size(options, 16.0f), theme->muted_text);
+              ui_size(options, 19.0f), theme->muted_text);
     draw_text(resources, "Right / Left: step", (Vector2){x, y + line * 8.7f},
-              ui_size(options, 16.0f), theme->muted_text);
+              ui_size(options, 19.0f), theme->muted_text);
     draw_text(resources, "0 / Enter: jump", (Vector2){x, y + line * 9.55f},
-              ui_size(options, 16.0f), theme->muted_text);
+              ui_size(options, 19.0f), theme->muted_text);
     draw_text(resources, "R: reset layout", (Vector2){x, y + line * 10.4f},
-              ui_size(options, 16.0f), theme->muted_text);
+              ui_size(options, 19.0f), theme->muted_text);
     draw_text(resources, "M: cycle algorithm", (Vector2){x, y + line * 11.25f},
-              ui_size(options, 16.0f), theme->muted_text);
+              ui_size(options, 19.0f), theme->muted_text);
     draw_text(resources, "Ctrl +/-: UI scale", (Vector2){x, y + line * 12.1f},
-              ui_size(options, 16.0f), theme->muted_text);
+              ui_size(options, 19.0f), theme->muted_text);
     draw_text(resources, "Tab: settings", (Vector2){x, y + line * 12.95f},
-              ui_size(options, 16.0f), theme->muted_text);
+              ui_size(options, 19.0f), theme->muted_text);
 
     draw_text(resources, "Edge Types", (Vector2){x, y + line * 15.0f},
-              ui_size(options, 21.0f), theme->text);
+              ui_size(options, 22.0f), theme->text);
 
     const EdgeType edge_types[] = {EDGE_TREE, EDGE_BACK, EDGE_FORWARD, EDGE_CROSS};
-    const char *labels[] = {"tree", "back", "forward", "cross"};
+    const char *labels[] = {"Tree", "Back", "Forward", "Cross"};
     for (int i = 0; i < 4; i++) {
-        float item_y = y + line * (16.1f + (float)i);
+        float item_y = y + 1.0f + line * (16.0f + (float)i * 0.8f);
         Color color = edge_color(theme, edge_types[i]);
-        DrawCircleV(
-            (Vector2){x + ui_size(options, 8.0f), item_y + ui_size(options, 8.0f)},
-            ui_size(options, 6.0f), color);
+        // DrawCircleV(
+        //     (Vector2){x + ui_size(options, 8.0f), item_y +
+        //     ui_size(options, 8.0f)}, ui_size(options, 6.0f), color);
         draw_text(resources, labels[i],
-                  (Vector2){x + ui_size(options, 24.0f), item_y},
-                  ui_size(options, 16.0f), color);
+                  // (Vector2){x + ui_size(options, 24.0f), item_y},
+                  (Vector2){x, item_y}, ui_size(options, 19.0f), color);
     }
 
     return result;

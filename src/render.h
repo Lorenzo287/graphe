@@ -10,7 +10,7 @@
 #define GRAPHE_NODE_RADIUS 30.0f
 #define GRAPHE_SIDEBAR_WIDTH 360.0f
 #define GRAPHE_UI_SCALE_MIN 0.85f
-#define GRAPHE_UI_SCALE_MAX 1.35f
+#define GRAPHE_UI_SCALE_MAX 2.4f  // 1.35f
 
 typedef enum LayoutMode {
     LAYOUT_TRACE_FOREST,

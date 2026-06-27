@@ -254,7 +254,7 @@ int main(void) {
     const float seconds_per_step = 0.65f;
 
     SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_WINDOW_RESIZABLE);
-    InitWindow(screen_width, screen_height, "Graphe - Algorithm Visualizer");
+    InitWindow(screen_width, screen_height, "Graphe");
     set_window_icon();
     SetWindowMinSize(GRAPHE_MIN_WINDOW_WIDTH, GRAPHE_MIN_WINDOW_HEIGHT);
     SetTargetFPS(60);
@@ -269,7 +269,7 @@ int main(void) {
         .directed_graph = true,
         .algorithm_mode = ALGORITHM_DFS,
         .layout_mode = LAYOUT_TRACE_FOREST,
-        .ui_scale = 1.0f,
+        .ui_scale = 1.2f,
     };
 
     Graph base_graph;
