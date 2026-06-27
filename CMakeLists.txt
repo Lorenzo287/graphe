@@ -44,14 +44,20 @@ FetchContent_MakeAvailable(raygui)
 add_executable(graphe
     src/dfs.c
     src/graph.c
+    src/graph_io.c
     src/layout.c
     src/main.c
+    src/platform_window.c
     src/raygui_impl.c
     src/render.c
 )
 
 target_include_directories(graphe PRIVATE src ${raygui_SOURCE_DIR}/src)
 target_link_libraries(graphe PRIVATE raylib)
+
+if(WIN32)
+    target_link_libraries(graphe PRIVATE dwmapi)
+endif()
 
 if(MSVC)
     set_source_files_properties(src/raygui_impl.c PROPERTIES COMPILE_OPTIONS /w)

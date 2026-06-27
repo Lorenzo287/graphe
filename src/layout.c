@@ -41,11 +41,10 @@ static void build_forest_from_trace(const Graph *graph, const Trace *trace,
             continue;
         }
 
-        const Edge *edge = &graph->edges[event->edge];
-        int child_count = state->child_counts[edge->from];
-        state->children[edge->from][child_count] = edge->to;
-        state->child_counts[edge->from]++;
-        state->parent[edge->to] = edge->from;
+        int child_count = state->child_counts[event->from];
+        state->children[event->from][child_count] = event->to;
+        state->child_counts[event->from]++;
+        state->parent[event->to] = event->from;
     }
 
     for (size_t i = 0; i < trace->count; i++) {

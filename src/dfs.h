@@ -10,6 +10,7 @@ typedef struct DfsOptions {
 typedef struct TraversalOptions {
     AlgorithmMode algorithm;
     int alphabetical;
+    TreeTraversalOrder tree_order;
 } TraversalOptions;
 
 void traversal_trace_build(const Graph *graph, const TraversalOptions *options,

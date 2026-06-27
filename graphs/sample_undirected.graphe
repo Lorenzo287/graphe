@@ -1,0 +1,10 @@
+# Graphe graph file v1
+undirected
+
+edge A B
+edge A C
+edge B D
+edge B E
+edge C F
+edge D C
+edge E F

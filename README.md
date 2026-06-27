@@ -2,10 +2,9 @@
 
 > *γραφή* (*graphê*): writing, drawing, a traced line.
 
-Graphe is a small C/raylib project for visualizing graph algorithms. It started
-as a DFS visualizer and now supports DFS, BFS, and tree traversal modes with node
-colors, discovery and finish times, active traversal events, and color-coded
-edges.
+Graphe is a small C/raylib project for visualizing graph algorithms. The mature
+mode is currently DFS, with node colors, discovery and finish times, active
+traversal events, and color-coded edges.
 
 The project is intentionally low-level enough to be educational: it uses a
 native event loop, per-frame drawing, simple geometry, and explicit algorithm
@@ -16,13 +15,18 @@ state instead of a web framework or a full game engine.
 The initial version contains:
 
 - a hardcoded sample directed graph;
-- a traversal trace with discover, examine edge, classify edge, and finish
-  events;
+- a DFS trace with discover, examine edge, classify edge, and finish events;
 - color-coded nodes and edges;
 - keyboard playback controls;
 - draggable nodes;
 - dark and light themes;
-- DFS, BFS, and tree traversal modes;
+- a runtime mode selector, with BFS and tree traversal still treated as
+  prototypes until they get their own state and rendering;
+- directed and undirected graph semantics for DFS, including arrow rendering and
+  undirected DFS edge classification;
+- graph import from a small text format;
+- a first expression-tree traversal mode with preorder, inorder, and postorder
+  output;
 - circular, manual, and traversal-forest layouts;
 - alphabetical traversal order by default.
 
@@ -77,16 +81,39 @@ clangd to resolve project includes and compiler flags.
 - `R`: reset the current layout.
 - `Tab`: open or close settings.
 - `M`: cycle algorithm mode.
+- `O`: cycle tree traversal order.
 - `T`: toggle dark mode.
 - `L`: cycle layout mode.
 - `A`: toggle alphabetical traversal order.
 - `Ctrl` + `+` / `Ctrl` + `-`: scale the interface.
+- `Ctrl` + `0`: reset the interface scale.
 - `Ctrl` + mouse wheel: scale the interface.
 - Left mouse drag: move a node.
 - Left mouse drag on the graph background: pan the canvas.
 - Mouse wheel over the graph: zoom the canvas.
 
 Dragging a node switches the layout mode to manual.
+
+## Graph Files
+
+Settings includes a path field and `Load` button for `.graphe` files. The format
+is line-oriented:
+
+```text
+# comments are ignored
+directed
+node A
+node B
+edge A B
+```
+
+Use `undirected` instead of `directed` for an undirected graph. `node` lines are
+optional for nodes that appear in edges, but useful for isolated nodes. Labels
+are single words up to 15 characters.
+
+Example files live in `graphs/sample_directed.graphe` and
+`graphs/sample_undirected.graphe`. The current loader still uses the project’s
+fixed graph limits: 16 nodes and 64 edges.
 
 ## Fonts
 
@@ -101,8 +128,13 @@ PNG at `assets/icons/graphe.png`; raylib will use it for the running window's
 titlebar and taskbar icon. Embedding an icon into the `.exe` file itself is a
 separate Windows resource step.
 
+On Windows, Graphe also applies a best-effort native title-bar color matching the
+current light or dark theme. This uses DWM attributes and depends on Windows
+version support.
+
 ## Direction
 
-The code separates the traversal event trace from rendering. That should make it
-reasonable to add more graph algorithms, Graphviz-assisted layout, or a
-different renderer later without rewriting the rendering core.
+The DFS implementation should remain separate from rendering. Future BFS and
+tree traversal modes should not be forced through DFS concepts: BFS should
+emphasize queue state and depth. Tree traversal now has a first expression-tree
+prototype and should continue moving toward a dedicated tree UI.

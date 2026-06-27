@@ -1,9 +1,10 @@
 # Graphe: Agent Manual
 
-Graphe is a C/raylib educational visualizer for graph algorithms. It started as
-an interactive DFS visualizer and now also includes BFS and tree traversal modes
-with discovery and finish times, color-coded nodes, and classified directed
-edges where the selected algorithm produces them.
+Graphe is a C/raylib educational visualizer for graph algorithms. The mature
+mode is an interactive DFS visualizer with discovery and finish times,
+color-coded nodes, and classified directed edges. BFS and tree traversal should
+be treated as separate modes with their own educational state, not as DFS
+variants.
 
 This file is for AI agents and maintainers working inside the repository. Keep
 public usage information in `README.md`; keep internal workflow, architecture,
@@ -24,8 +25,11 @@ and verification guidance here.
 - `docs/ROADMAP.md`: current plan and next steps.
 - `src/main.c`: raylib application loop, playback controls, and input handling.
 - `src/graph.*`: graph storage, visual state, labels, and sample graph setup.
-- `src/dfs.*`: traversal event trace generation/application for DFS, BFS, and
-  tree traversal.
+- `src/graph_io.*`: `.graphe` file loading.
+- `src/dfs.*`: DFS event trace generation/application, temporary BFS prototype,
+  and first expression-tree traversal prototype.
+- `src/platform_window.*`: small platform hooks such as Windows title-bar
+  styling.
 - `src/layout.*`: graph layout helpers.
 - `src/render.*`: raylib drawing code for nodes, edges, labels, and UI text.
 - `src/raygui_impl.c`: single raygui implementation translation unit.
@@ -34,9 +38,10 @@ and verification guidance here.
 
 - Main entry point: `src/main.c`.
 - Public user-facing surface: the native raylib window launched by `graphe`.
-- Core implementation: `src/dfs.c` and `src/graph.c`.
+- Core DFS implementation: `src/dfs.c` and `src/graph.c`.
 - Rendering surface: `src/render.c`.
 - Layout logic: `src/layout.c`.
+- Graph import format examples: `graphs/*.graphe`.
 - Tests: none yet; add focused tests before making traversal behavior more
   complex.
 - Build or task runner: CMake.
@@ -98,9 +103,12 @@ and verification guidance here.
 - Naming and style: use `graphe_` or module-local names for new public helpers;
   keep structs and enums explicit and small. Use attached braces and declare
   local variables near first use.
-- Architecture boundaries: traversal algorithms should produce/apply events
-  without depending on raylib. Rendering should consume graph state and trace
-  data, not run the traversal.
+- Architecture boundaries: algorithm code should produce/apply mode-specific
+  state without depending on raylib. Rendering should consume graph or tree
+  state and trace data, not run the traversal.
+- Directedness belongs to `Graph`, not only the renderer. Undirected graphs are
+  represented by one edge linked into both endpoint adjacency lists; keep
+  traversal `O(V + E)` without duplicating undirected edge events.
 - Dependency policy: avoid extra dependencies unless they clearly support the
   visualizer. raygui is the current UI helper. Graphviz may be added later as an
   optional layout helper, not as the primary renderer.
@@ -109,15 +117,19 @@ and verification guidance here.
 
 ## Design Philosophy
 
-- Keep algorithm state separate from rendering state so DFS, BFS, tree
-  traversal, future algorithms, and future renderers can share the same event
-  model.
+- Keep algorithm state separate from rendering state. Share small helpers only
+  where the concepts are genuinely common; do not force DFS, BFS, and tree
+  traversal through one abstract event model when the educational point differs.
 - Prefer simple visible progress over premature graphics complexity. Start with
   clear circles, lines, labels, and controls; add curves, physics, and Graphviz
   layout after the basic visualizer is solid.
-- Make each animation frame explainable: node colors, edge colors, active event,
-  discovery times, finish times, and playback controls should agree with the
-  selected traversal trace.
+- Make each animation frame explainable. In DFS, node colors, edge colors,
+  active event, discovery times, finish times, and playback controls should
+  agree with the DFS trace. BFS should emphasize depth and queue/frontier state.
+  Tree traversal should emphasize preorder/inorder/postorder output on the
+  expression tree sample.
+- Keep the main graph event sentence visible near the graph canvas. The sidebar
+  is for secondary state, controls, and settings.
 
 ## Verification
 

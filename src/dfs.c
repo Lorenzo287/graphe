@@ -5,12 +5,15 @@
 typedef struct TraversalState {
     NodeColor colors[GRAPHE_MAX_NODES];
     int discover_times[GRAPHE_MAX_NODES];
+    int parent_edges[GRAPHE_MAX_NODES];
+    int edge_classified[GRAPHE_MAX_EDGES];
     int time;
 } TraversalState;
 
 static const TraversalOptions default_options = {
     .algorithm = ALGORITHM_DFS,
     .alphabetical = 1,
+    .tree_order = TREE_ORDER_INORDER,
 };
 
 static const DfsOptions default_dfs_options = {.alphabetical = 1};
@@ -28,19 +31,23 @@ static TraceEvent make_node_event(TraceEventType type, int node, int time) {
     event.type = type;
     event.node = node;
     event.edge = -1;
+    event.from = -1;
+    event.to = -1;
     event.edge_type = EDGE_UNCLASSIFIED;
     event.time = time;
 
     return event;
 }
 
-static TraceEvent make_edge_event(TraceEventType type, int edge,
+static TraceEvent make_edge_event(TraceEventType type, int edge, int from, int to,
                                   EdgeType edge_type) {
     TraceEvent event;
 
     event.type = type;
     event.node = -1;
     event.edge = edge;
+    event.from = from;
+    event.to = to;
     event.edge_type = edge_type;
     event.time = -1;
 
@@ -54,7 +61,10 @@ static void traversal_state_init(const Graph *graph, TraversalState *state) {
     for (size_t i = 0; i < graph->node_count; i++) {
         state->colors[i] = NODE_WHITE;
         state->discover_times[i] = -1;
+        state->parent_edges[i] = -1;
     }
+
+    for (size_t i = 0; i < graph->edge_count; i++) state->edge_classified[i] = 0;
 }
 
 static int first_out_edge(const Graph *graph, int node,
@@ -63,10 +73,18 @@ static int first_out_edge(const Graph *graph, int node,
     return graph->first_out[node];
 }
 
-static int next_out_edge(const Graph *graph, int edge_id,
+static int next_out_edge(const Graph *graph, int edge_id, int node,
                          const TraversalOptions *options) {
-    if (options->alphabetical) return graph->edges[edge_id].next_alpha_out;
-    return graph->edges[edge_id].next_out;
+    return graph_next_adjacent_edge(graph, edge_id, node, options->alphabetical);
+}
+
+static int next_out_edge_in_insertion_order(const Graph *graph, int edge_id,
+                                            int node) {
+    return graph_next_adjacent_edge(graph, edge_id, node, false);
+}
+
+static int first_out_edge_in_insertion_order(const Graph *graph, int node) {
+    return graph->first_out[node];
 }
 
 static int first_root_node(const Graph *graph, const TraversalOptions *options) {
@@ -106,26 +124,50 @@ static EdgeType classify_dfs_seen_edge(const TraversalState *state, int from,
     return EDGE_CROSS;
 }
 
-static void dfs_visit_node(const Graph *graph, int node,
+static bool is_reverse_parent_edge(const Graph *graph, int edge_id,
+                                   int parent_edge) {
+    if (graph->directed || parent_edge < 0) return false;
+
+    return parent_edge == edge_id;
+}
+
+static void dfs_visit_node(const Graph *graph, int node, int parent_edge,
                            const TraversalOptions *options, TraversalState *state,
                            Trace *trace) {
     discover_node(state, trace, node);
 
     for (int edge_id = first_out_edge(graph, node, options); edge_id != -1;
-         edge_id = next_out_edge(graph, edge_id, options)) {
-        const Edge *edge = &graph->edges[edge_id];
+         edge_id = next_out_edge(graph, edge_id, node, options)) {
+        int neighbor = graph_edge_neighbor(graph, edge_id, node);
 
-        push_event(trace, make_edge_event(TRACE_EVENT_EXAMINE_EDGE, edge_id,
-                                          EDGE_UNCLASSIFIED));
+        if (neighbor < 0) continue;
+        if (is_reverse_parent_edge(graph, edge_id, parent_edge)) continue;
+        if (!graph->directed && state->edge_classified[edge_id]) continue;
+        if (!graph->directed && state->colors[neighbor] == NODE_BLACK) continue;
 
-        if (state->colors[edge->to] == NODE_WHITE) {
+        push_event(trace, make_edge_event(TRACE_EVENT_EXAMINE_EDGE, edge_id, node,
+                                          neighbor, EDGE_UNCLASSIFIED));
+
+        if (state->colors[neighbor] == NODE_WHITE) {
+            state->parent_edges[neighbor] = edge_id;
+            state->edge_classified[edge_id] = 1;
             push_event(trace, make_edge_event(TRACE_EVENT_CLASSIFY_EDGE, edge_id,
-                                              EDGE_TREE));
-            dfs_visit_node(graph, edge->to, options, state, trace);
+                                              node, neighbor, EDGE_TREE));
+            dfs_visit_node(graph, neighbor, edge_id, options, state, trace);
         } else {
-            EdgeType edge_type = classify_dfs_seen_edge(state, edge->from, edge->to);
+            EdgeType edge_type;
+
+            if (!graph->directed && state->colors[neighbor] != NODE_GRAY) continue;
+
+            if (graph->directed) {
+                edge_type = classify_dfs_seen_edge(state, node, neighbor);
+            } else {
+                edge_type = EDGE_BACK;
+                state->edge_classified[edge_id] = 1;
+            }
+
             push_event(trace, make_edge_event(TRACE_EVENT_CLASSIFY_EDGE, edge_id,
-                                              edge_type));
+                                              node, neighbor, edge_type));
         }
     }
 
@@ -140,7 +182,7 @@ static void build_dfs_trace(const Graph *graph, const TraversalOptions *options,
     for (int node = first_root_node(graph, options); node != -1;
          node = next_root_node(graph, node, options)) {
         if (state.colors[node] == NODE_WHITE)
-            dfs_visit_node(graph, node, options, &state, trace);
+            dfs_visit_node(graph, node, -1, options, &state, trace);
     }
 }
 
@@ -166,21 +208,32 @@ static void build_bfs_trace(const Graph *graph, const TraversalOptions *options,
             head++;
 
             for (int edge_id = first_out_edge(graph, node, options); edge_id != -1;
-                 edge_id = next_out_edge(graph, edge_id, options)) {
-                const Edge *edge = &graph->edges[edge_id];
+                 edge_id = next_out_edge(graph, edge_id, node, options)) {
+                int neighbor = graph_edge_neighbor(graph, edge_id, node);
 
-                push_event(trace, make_edge_event(TRACE_EVENT_EXAMINE_EDGE, edge_id,
-                                                  EDGE_UNCLASSIFIED));
+                if (neighbor < 0) continue;
+                if (is_reverse_parent_edge(graph, edge_id, state.parent_edges[node]))
+                    continue;
+                if (!graph->directed && state.edge_classified[edge_id]) continue;
 
-                if (state.colors[edge->to] == NODE_WHITE) {
-                    push_event(trace, make_edge_event(TRACE_EVENT_CLASSIFY_EDGE,
-                                                      edge_id, EDGE_TREE));
-                    discover_node(&state, trace, edge->to);
-                    queue[tail] = edge->to;
+                push_event(trace,
+                           make_edge_event(TRACE_EVENT_EXAMINE_EDGE, edge_id, node,
+                                           neighbor, EDGE_UNCLASSIFIED));
+
+                if (state.colors[neighbor] == NODE_WHITE) {
+                    state.parent_edges[neighbor] = edge_id;
+                    state.edge_classified[edge_id] = 1;
+                    push_event(trace,
+                               make_edge_event(TRACE_EVENT_CLASSIFY_EDGE, edge_id,
+                                               node, neighbor, EDGE_TREE));
+                    discover_node(&state, trace, neighbor);
+                    queue[tail] = neighbor;
                     tail++;
                 } else {
-                    push_event(trace, make_edge_event(TRACE_EVENT_CLASSIFY_EDGE,
-                                                      edge_id, EDGE_CROSS));
+                    if (!graph->directed) continue;
+                    push_event(trace,
+                               make_edge_event(TRACE_EVENT_CLASSIFY_EDGE, edge_id,
+                                               node, neighbor, EDGE_CROSS));
                 }
             }
 
@@ -189,25 +242,59 @@ static void build_bfs_trace(const Graph *graph, const TraversalOptions *options,
     }
 }
 
+static int collect_tree_child_edges(const Graph *graph, int node, int *child_edges,
+                                    int capacity) {
+    int count = 0;
+
+    for (int edge_id = first_out_edge_in_insertion_order(graph, node); edge_id != -1;
+         edge_id = next_out_edge_in_insertion_order(graph, edge_id, node)) {
+        int neighbor = graph_edge_neighbor(graph, edge_id, node);
+        if (neighbor < 0) continue;
+        if (count >= capacity) break;
+
+        child_edges[count] = edge_id;
+        count++;
+    }
+
+    return count;
+}
+
 static void tree_visit_node(const Graph *graph, int node,
                             const TraversalOptions *options, TraversalState *state,
                             Trace *trace) {
-    discover_node(state, trace, node);
+    int child_edges[GRAPHE_MAX_NODES];
+    int child_count =
+        collect_tree_child_edges(graph, node, child_edges, GRAPHE_MAX_NODES);
+    int visited_node = 0;
 
-    for (int edge_id = first_out_edge(graph, node, options); edge_id != -1;
-         edge_id = next_out_edge(graph, edge_id, options)) {
-        const Edge *edge = &graph->edges[edge_id];
-
-        if (state->colors[edge->to] != NODE_WHITE) continue;
-
-        push_event(trace, make_edge_event(TRACE_EVENT_EXAMINE_EDGE, edge_id,
-                                          EDGE_UNCLASSIFIED));
-        push_event(trace,
-                   make_edge_event(TRACE_EVENT_CLASSIFY_EDGE, edge_id, EDGE_TREE));
-        tree_visit_node(graph, edge->to, options, state, trace);
+    if (options->tree_order == TREE_ORDER_PREORDER) {
+        discover_node(state, trace, node);
+        visited_node = 1;
     }
 
-    finish_node(state, trace, node);
+    for (int i = 0; i < child_count; i++) {
+        if (options->tree_order == TREE_ORDER_INORDER && i == 1) {
+            discover_node(state, trace, node);
+            visited_node = 1;
+        }
+
+        int edge_id = child_edges[i];
+        int neighbor = graph_edge_neighbor(graph, edge_id, node);
+        if (neighbor < 0 || state->colors[neighbor] != NODE_WHITE) continue;
+
+        push_event(trace, make_edge_event(TRACE_EVENT_EXAMINE_EDGE, edge_id, node,
+                                          neighbor, EDGE_UNCLASSIFIED));
+        push_event(trace, make_edge_event(TRACE_EVENT_CLASSIFY_EDGE, edge_id, node,
+                                          neighbor, EDGE_TREE));
+        tree_visit_node(graph, neighbor, options, state, trace);
+    }
+
+    if (options->tree_order == TREE_ORDER_INORDER && !visited_node) {
+        discover_node(state, trace, node);
+        visited_node = 1;
+    }
+    if (options->tree_order == TREE_ORDER_POSTORDER)
+        discover_node(state, trace, node);
 }
 
 static void build_tree_trace(const Graph *graph, const TraversalOptions *options,
@@ -283,6 +370,7 @@ void dfs_trace_build_with_options(const Graph *graph, const DfsOptions *options,
     TraversalOptions traversal_options = {
         .algorithm = ALGORITHM_DFS,
         .alphabetical = options->alphabetical,
+        .tree_order = TREE_ORDER_INORDER,
     };
 
     traversal_trace_build(graph, &traversal_options, trace);

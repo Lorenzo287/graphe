@@ -1,11 +1,14 @@
 #include "dfs.h"
 #include "graph.h"
+#include "graph_io.h"
 #include "layout.h"
+#include "platform_window.h"
 #include "render.h"
 
 #include "raylib.h"
 
 #include <stdbool.h>
+#include <stdio.h>
 
 #define GRAPHE_MIN_WINDOW_WIDTH 880
 #define GRAPHE_MIN_WINDOW_HEIGHT 560
@@ -179,15 +182,52 @@ static void apply_layout(Graph *graph, const Trace *trace,
     }
 }
 
+static Graph *active_base_graph(RenderOptions *options, Graph *graph_base,
+                                Graph *tree_base) {
+    if (options->algorithm_mode == ALGORITHM_TREE) return tree_base;
+    return graph_base;
+}
+
 static void rebuild_trace(Graph *base_graph, Trace *trace,
                           const RenderOptions *options, size_t *step) {
     TraversalOptions traversal_options = {
         .algorithm = options->algorithm_mode,
         .alphabetical = options->alphabetical_order,
+        .tree_order = options->tree_order,
     };
 
     traversal_trace_build(base_graph, &traversal_options, trace);
     if (*step > trace->count) *step = trace->count;
+}
+
+static size_t visible_edge_count(const Graph *graph) {
+    size_t count = 0;
+
+    for (size_t i = 0; i < graph->edge_count; i++) {
+        if (graph_edge_is_visible(graph, (int)i)) count++;
+    }
+
+    return count;
+}
+
+static bool graph_positions_collapsed(const Graph *graph) {
+    if (graph->node_count <= 1) return false;
+
+    float x = graph->nodes[0].x;
+    float y = graph->nodes[0].y;
+
+    for (size_t i = 1; i < graph->node_count; i++) {
+        if (graph->nodes[i].x != x || graph->nodes[i].y != y) return false;
+    }
+
+    return true;
+}
+
+static void apply_layout_for_collapsed_graph(Graph *graph, const Trace *trace,
+                                             RenderOptions *options) {
+    if (options->layout_mode == LAYOUT_MANUAL)
+        options->layout_mode = LAYOUT_TRACE_FOREST;
+    apply_layout(graph, trace, options);
 }
 
 static void refresh_layout_after_window_change(Graph *graph, const Trace *trace,
@@ -204,6 +244,13 @@ static bool adjust_ui_scale(RenderOptions *options, float delta) {
     if (next_scale == options->ui_scale) return false;
 
     options->ui_scale = next_scale;
+    return true;
+}
+
+static bool reset_ui_scale(RenderOptions *options) {
+    if (options->ui_scale == GRAPHE_UI_SCALE_DEFAULT) return false;
+
+    options->ui_scale = GRAPHE_UI_SCALE_DEFAULT;
     return true;
 }
 
@@ -229,14 +276,64 @@ static void zoom_camera_at_mouse(Camera2D *camera, Vector2 mouse, float wheel) {
     camera->target.y += before.y - after.y;
 }
 
-static void apply_ui_result(RenderUiResult result, Graph *base_graph, Trace *trace,
-                            RenderOptions *options, size_t *step, Camera2D *camera,
-                            bool *playing) {
+static void apply_ui_result(RenderUiResult result, Graph *graph_base,
+                            Graph *tree_base, Trace *trace, RenderOptions *options,
+                            size_t *step, Camera2D *camera, bool *playing) {
+    Graph *base_graph = active_base_graph(options, graph_base, tree_base);
+
+    if (result.graph_load_requested) {
+        Graph loaded_graph;
+        char error[GRAPHE_STATUS_MESSAGE_MAX];
+
+        options->graph_path_editing = false;
+
+        if (graph_load_from_file(options->graph_path, &loaded_graph, error,
+                                 sizeof(error))) {
+            *graph_base = loaded_graph;
+            options->directed_graph = graph_base->directed;
+            if (options->layout_mode == LAYOUT_MANUAL)
+                options->layout_mode = LAYOUT_TRACE_FOREST;
+            base_graph = active_base_graph(options, graph_base, tree_base);
+            *step = 0;
+            rebuild_trace(base_graph, trace, options, step);
+            apply_layout(base_graph, trace, options);
+            reset_graph_camera(camera, base_graph, options);
+            *playing = false;
+            snprintf(options->status_message, sizeof(options->status_message),
+                     "Loaded %d nodes, %d edges", (int)graph_base->node_count,
+                     (int)visible_edge_count(graph_base));
+        } else {
+            snprintf(options->status_message, sizeof(options->status_message),
+                     "Load failed: %.120s", error);
+        }
+
+        return;
+    }
+
+    if (options->algorithm_mode != ALGORITHM_TREE &&
+        graph_base->directed != options->directed_graph) {
+        if (graph_set_directed(graph_base, options->directed_graph)) {
+            result.trace_changed = true;
+            snprintf(options->status_message, sizeof(options->status_message),
+                     "Graph is now %s",
+                     graph_base->directed ? "directed" : "undirected");
+        } else {
+            options->directed_graph = graph_base->directed;
+            snprintf(options->status_message, sizeof(options->status_message),
+                     "Could not change graph direction");
+        }
+    }
+
+    base_graph = active_base_graph(options, graph_base, tree_base);
+
     if (result.trace_changed) {
         rebuild_trace(base_graph, trace, options, step);
         *step = 0;
-        if (options->layout_mode == LAYOUT_TRACE_FOREST)
+        if (graph_positions_collapsed(base_graph)) {
+            apply_layout_for_collapsed_graph(base_graph, trace, options);
+        } else if (options->layout_mode == LAYOUT_TRACE_FOREST) {
             apply_layout(base_graph, trace, options);
+        }
         reset_graph_camera(camera, base_graph, options);
         *playing = false;
     }
@@ -253,7 +350,7 @@ int main(void) {
     const int screen_height = 760;
     const float seconds_per_step = 0.65f;
 
-    SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_WINDOW_RESIZABLE);
+    SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_VSYNC_HINT | FLAG_WINDOW_RESIZABLE);
     InitWindow(screen_width, screen_height, "Graphe");
     set_window_icon();
     SetWindowMinSize(GRAPHE_MIN_WINDOW_WIDTH, GRAPHE_MIN_WINDOW_HEIGHT);
@@ -267,21 +364,30 @@ int main(void) {
         .settings_open = false,
         .alphabetical_order = true,
         .directed_graph = true,
+        .graph_path_editing = false,
         .algorithm_mode = ALGORITHM_DFS,
+        .tree_order = TREE_ORDER_INORDER,
         .layout_mode = LAYOUT_TRACE_FOREST,
-        .ui_scale = 1.2f,
+        .ui_scale = GRAPHE_UI_SCALE_DEFAULT,
+        .graph_path = "graphs/sample_directed.graphe",
+        .status_message = "",
     };
+    platform_window_apply_style(options.dark_mode);
+    bool native_style_dark_mode = options.dark_mode;
 
-    Graph base_graph;
-    graph_build_sample(&base_graph);
+    Graph graph_base;
+    graph_build_sample(&graph_base);
+    Graph tree_base;
+    graph_build_expression_tree(&tree_base);
 
     Trace trace;
     size_t step = 0;
-    rebuild_trace(&base_graph, &trace, &options, &step);
-    apply_layout(&base_graph, &trace, &options);
+    Graph *base_graph = active_base_graph(&options, &graph_base, &tree_base);
+    rebuild_trace(base_graph, &trace, &options, &step);
+    apply_layout(base_graph, &trace, &options);
 
     Camera2D graph_camera = make_graph_camera();
-    reset_graph_camera(&graph_camera, &base_graph, &options);
+    reset_graph_camera(&graph_camera, base_graph, &options);
     Graph scene_graph;
     bool playing = false;
     float playback_time = 0.0f;
@@ -298,14 +404,23 @@ int main(void) {
         float wheel = GetMouseWheelMove();
         bool control_down =
             IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL);
+        bool shortcuts_enabled = !options.graph_path_editing;
         RenderUiResult ui_result = render_update_options(&options);
 
-        apply_ui_result(ui_result, &base_graph, &trace, &options, &step,
-                        &graph_camera, &playing);
+        base_graph = active_base_graph(&options, &graph_base, &tree_base);
 
-        if (control_down) {
+        apply_ui_result(ui_result, &graph_base, &tree_base, &trace, &options, &step,
+                        &graph_camera, &playing);
+        if (native_style_dark_mode != options.dark_mode) {
+            platform_window_apply_style(options.dark_mode);
+            native_style_dark_mode = options.dark_mode;
+        }
+
+        if (shortcuts_enabled && control_down) {
             bool scale_changed = false;
 
+            if (IsKeyPressed(KEY_ZERO) || IsKeyPressed(KEY_KP_0))
+                scale_changed = reset_ui_scale(&options) || scale_changed;
             if (scale_up_key_pressed())
                 scale_changed = adjust_ui_scale(&options, 0.08f) || scale_changed;
             if (scale_down_key_pressed())
@@ -314,9 +429,11 @@ int main(void) {
                 scale_changed =
                     adjust_ui_scale(&options, wheel * 0.06f) || scale_changed;
 
-            if (scale_changed)
-                refresh_layout_after_window_change(&base_graph, &trace, &options,
+            if (scale_changed) {
+                base_graph = active_base_graph(&options, &graph_base, &tree_base);
+                refresh_layout_after_window_change(base_graph, &trace, &options,
                                                    &graph_camera);
+            }
         }
 
         int current_window_width = GetScreenWidth();
@@ -326,30 +443,34 @@ int main(void) {
              current_window_height != window_height)) {
             window_width = current_window_width;
             window_height = current_window_height;
-            refresh_layout_after_window_change(&base_graph, &trace, &options,
+            base_graph = active_base_graph(&options, &graph_base, &tree_base);
+            refresh_layout_after_window_change(base_graph, &trace, &options,
                                                &graph_camera);
         }
 
-        if (IsKeyPressed(KEY_SPACE)) playing = !playing;
-        if (IsKeyPressed(KEY_RIGHT)) {
+        if (shortcuts_enabled && IsKeyPressed(KEY_SPACE)) playing = !playing;
+        if (shortcuts_enabled && IsKeyPressed(KEY_RIGHT)) {
             step_forward(&step, &trace);
             playing = false;
         }
-        if (IsKeyPressed(KEY_LEFT)) {
+        if (shortcuts_enabled && IsKeyPressed(KEY_LEFT)) {
             step_backward(&step);
             playing = false;
         }
-        if (IsKeyPressed(KEY_ZERO) || IsKeyPressed(KEY_KP_0)) {
+        if (shortcuts_enabled && !control_down &&
+            (IsKeyPressed(KEY_ZERO) || IsKeyPressed(KEY_KP_0))) {
             step = 0;
             playing = false;
         }
-        if (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_KP_ENTER)) {
+        if (shortcuts_enabled &&
+            (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_KP_ENTER))) {
             step = trace.count;
             playing = false;
         }
-        if (IsKeyPressed(KEY_R)) {
-            apply_layout(&base_graph, &trace, &options);
-            reset_graph_camera(&graph_camera, &base_graph, &options);
+        if (shortcuts_enabled && IsKeyPressed(KEY_R)) {
+            base_graph = active_base_graph(&options, &graph_base, &tree_base);
+            apply_layout(base_graph, &trace, &options);
+            reset_graph_camera(&graph_camera, base_graph, &options);
             playing = false;
         }
 
@@ -374,11 +495,12 @@ int main(void) {
         if (!ui_result.consumed_click && !options.settings_open &&
             render_point_in_graph_canvas(mouse, &options) &&
             IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
-            dragging_node = find_node_at(&base_graph, mouse_world);
+            base_graph = active_base_graph(&options, &graph_base, &tree_base);
+            dragging_node = find_node_at(base_graph, mouse_world);
             if (dragging_node >= 0) {
                 options.layout_mode = LAYOUT_MANUAL;
-                drag_offset.x = base_graph.nodes[dragging_node].x - mouse_world.x;
-                drag_offset.y = base_graph.nodes[dragging_node].y - mouse_world.y;
+                drag_offset.x = base_graph->nodes[dragging_node].x - mouse_world.x;
+                drag_offset.y = base_graph->nodes[dragging_node].y - mouse_world.y;
             } else {
                 panning_graph = true;
             }
@@ -387,8 +509,9 @@ int main(void) {
         if (dragging_node >= 0) {
             if (IsMouseButtonDown(MOUSE_LEFT_BUTTON)) {
                 mouse_world = GetScreenToWorld2D(mouse, graph_camera);
-                base_graph.nodes[dragging_node].x = mouse_world.x + drag_offset.x;
-                base_graph.nodes[dragging_node].y = mouse_world.y + drag_offset.y;
+                base_graph = active_base_graph(&options, &graph_base, &tree_base);
+                base_graph->nodes[dragging_node].x = mouse_world.x + drag_offset.x;
+                base_graph->nodes[dragging_node].y = mouse_world.y + drag_offset.y;
             } else {
                 dragging_node = -1;
             }
@@ -404,7 +527,8 @@ int main(void) {
             }
         }
 
-        traversal_trace_apply_prefix(&base_graph, &trace, step, &scene_graph);
+        base_graph = active_base_graph(&options, &graph_base, &tree_base);
+        traversal_trace_apply_prefix(base_graph, &trace, step, &scene_graph);
 
         BeginDrawing();
         ClearBackground(render_background_color(&options));
@@ -412,8 +536,12 @@ int main(void) {
             &scene_graph, &trace, step, &render_resources, &options, &graph_camera);
         EndDrawing();
 
-        apply_ui_result(draw_result, &base_graph, &trace, &options, &step,
-                        &graph_camera, &playing);
+        apply_ui_result(draw_result, &graph_base, &tree_base, &trace, &options,
+                        &step, &graph_camera, &playing);
+        if (native_style_dark_mode != options.dark_mode) {
+            platform_window_apply_style(options.dark_mode);
+            native_style_dark_mode = options.dark_mode;
+        }
     }
 
     render_resources_unload(&render_resources);
