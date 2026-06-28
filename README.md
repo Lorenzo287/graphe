@@ -4,7 +4,7 @@
 
 Graphe is a small C/raylib project for visualizing graph algorithms with color-coded operations and interactive playback. DFS, BFS, and tree traversal are supported.
 
-![Graphe DFS visualizer](docs/images/graphe.png)
+![Graphe DFS visualizer](assets/screenshot001.png)
 
 ## Build
 
@@ -46,19 +46,11 @@ ctest --test-dir build -C Debug --output-on-failure
 | `T`                    | Toggle dark mode                      |
 | `A`                    | Toggle alphabetical order             |
 | `R`                    | Reset layout                          |
-| `F12`                  | Save screenshot                       |
+| `F12`                  | Save numbered screenshot              |
 | `Ctrl` `+` / `-` / `0` | Scale UI                              |
 | Drag node              | Move node (switches to manual layout) |
 | Drag background        | Pan canvas                            |
 | Scroll over graph      | Zoom canvas                           |
-
-## Screenshot
-
-Press `F12` to save `graphe-screenshot.png`. To refresh the README image:
-
-```sh
-./build/gcc-release/graphe --screenshot docs/images/graphe.png
-```
 
 ## Graph Files
 
