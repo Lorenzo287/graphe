@@ -1,88 +1,35 @@
 # Roadmap
 
-## Current Direction
+## Current State
 
-Build Graphe as a native C/raylib educational visualizer for graph algorithms.
-DFS is the mature graph mode. BFS now has first-class level/depth presentation,
-but still needs queue/frontier visualization. Tree traversal has a first
-expression-tree prototype and should continue toward a dedicated tree UI.
+- Native C99/raylib app with raygui controls, dark/light theme, pan/zoom, node
+  dragging, multiple layouts, dynamic graph storage, and `.graphe` loading.
+- DFS is the mature graph mode: discovery/finish timestamps, node colors, and
+  directed/undirected edge classification are implemented.
+- BFS has its own presentation with node levels and a depth gradient, but still
+  needs queue/frontier visualization.
+- Tree traversal can load tree `.graphe` files and show preorder, inorder, and
+  postorder output on the expression-tree prototype.
+- Graph directedness lives in `Graph`; undirected graphs store one shared edge
+  linked from both endpoints so traversal stays `O(V + E)`.
+- Focused C tests cover core graph, traversal, and import behavior.
 
-## Completed
+## Next Work
 
-- Chose C + raylib as the first renderer.
-- Bootstrapped the repository with CMake, README, agent instructions, roadmap,
-  and initial source files.
-- Added a hardcoded sample directed graph that exercises tree, back, forward,
-  and cross edge classifications.
-- Added a traversal event trace model that is independent of raylib.
-- Confirmed the initial raylib app runs locally.
-- Added simple GCC/Ninja CMake build commands for debug and release builds.
-- Added clangd support through CMake's `compile_commands.json` export and a
-  `.clangd` config.
-- Changed graph traversal to use outgoing adjacency chains with stable edge IDs,
-  preserving `O(V + E)` traversal complexity.
-- Added a first UI polish pass: dark mode, runtime settings drawer, TTF font
-  loading with fallback, MSAA hinting, thicker edges, curved non-tree edges,
-  traversal-forest layout, and default alphabetical traversal.
-- Added graph canvas pan/zoom, node dragging, a modal settings overlay, larger
-  UI text, distance-based edge curvature, and slight deterministic jitter in the
-  traversal forest layout.
-- Replaced the custom window chrome with native window controls, added raygui
-  for runtime settings, and changed `Ctrl` + wheel/`+`/`-` to scale the app UI
-  instead of resizing the OS window.
-- Bundled Atkinson Hyperlegible regular under `assets/fonts/` with its OFL
-  license text.
-- Added prototype BFS and tree traversal modes alongside DFS, then identified
-  that they need a cleaner mode split before they should be considered finished.
-- Audited layout/camera coupling after resize: reset now centers on graph bounds
-  and circular layout uses the smaller graph-canvas dimension.
-- Aligned the current C source with the preferred style reference: attached
-  braces and declarations near first use.
-- Added best-effort Windows native title-bar coloring, `Ctrl+0` UI scale reset,
-  a directed/undirected rendering toggle, visible directed-arrow rendering, and
-  raygui hover colors that lighten from the current button state.
-- Added `.graphe` file loading from the settings panel, with directed and
-  undirected sample files.
-- Moved the current event sentence into a bottom graph-canvas banner and added a
-  subtle themed word-pattern background behind the graph.
-- Promoted graph directedness into `Graph`: undirected graphs store one edge,
-  maintain incident adjacency lists for efficient traversal, render without
-  arrows, and DFS now uses undirected-style tree/back classification.
-- Changed active DFS classification rendering so the classified edge color
-  appears on the classification step instead of only on the following step.
-- Added a first expression-tree mode for preorder, inorder, and postorder
-  traversal output.
-- Renamed the shared algorithm trace module from `dfs.*` to `traversal.*`.
-- Changed BFS presentation to show node levels and a depth gradient instead of
-  presenting DFS-style edge classifications.
-- Replaced fixed graph, trace, traversal-state, and layout scratch limits with
-  dynamic storage.
-- Added tree import syntax to `.graphe` files, with stable tree node IDs and
-  free-form displayed values.
-- Added focused C tests for alphabetical adjacency, directed/undirected graph
-  views, undirected BFS edge classification, tree loading, and showcase graph
-  loading.
-- Cached the graph word-pattern background in a render texture so it is rebuilt
-  only when the graph canvas size, theme, or UI scale changes.
-
-## Next Steps
-
-- Split the runtime modes explicitly:
+- Split runtime mode state and UI more explicitly:
   - DFS: discovery/finish times, node colors, and edge classification.
-  - BFS: queue/frontier state and clearer BFS tree emphasis.
-  - Tree traversal: continue replacing graph-specific UI with tree-specific
-    controls and expression output.
-- Consider an in-app graph editor after file loading and dynamic graph storage
-  feel solid.
-- Improve edge rendering with curved edges, reciprocal-edge handling, and
-  self-loop support.
-- Continue UI polish inside the native window: spacing, settings grouping, and
+  - BFS: queue/frontier state, levels, and clearer BFS tree emphasis.
+  - Tree traversal: tree-specific controls, layout, and expression output.
+- Add focused tests for DFS timestamps, BFS levels, edge classifications, and
+  import edge cases.
+- Improve edge rendering for reciprocal edges and self-loops.
+- Continue native-window UI polish: spacing, settings grouping, and
   cross-platform visual checks.
-- Add focused tests for traversal timestamps, BFS levels, and edge
-  classifications.
-- Add optional Graphviz layout import using `dot` or `neato` output.
+- Consider an in-app graph editor once file loading and dynamic storage feel
+  stable.
 
 ## Deferred
 
-- Force-directed physics layout with draggable/pinned nodes.
+- Optional Graphviz layout import through `dot` or `neato` output.
+- Force-directed physics layout with draggable or pinned nodes.
 - WebAssembly/browser build target.
