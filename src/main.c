@@ -9,9 +9,16 @@
 
 #include <stdbool.h>
 #include <stdio.h>
+#include <string.h>
 
+#define GRAPHE_DEFAULT_WINDOW_WIDTH 1180
+#define GRAPHE_DEFAULT_WINDOW_HEIGHT 760
 #define GRAPHE_MIN_WINDOW_WIDTH 880
 #define GRAPHE_MIN_WINDOW_HEIGHT 560
+#define GRAPHE_SCREENSHOT_WINDOW_WIDTH 1920
+#define GRAPHE_SCREENSHOT_WINDOW_HEIGHT 1080
+#define GRAPHE_SCREENSHOT_PATH_MAX 260
+#define GRAPHE_MANUAL_SCREENSHOT_PATH "graphe-screenshot.png"
 
 // #define GRAPHE_GLOW
 
@@ -26,6 +33,94 @@ static Vector2 scaled_icon_point(int icon_size, float x, float y) {
         (float)scaled_icon_value(icon_size, x),
         (float)scaled_icon_value(icon_size, y),
     };
+}
+
+typedef struct StartupOptions {
+    int window_width;
+    int window_height;
+    bool window_size_set;
+    bool screenshot_once;
+    char screenshot_path[GRAPHE_SCREENSHOT_PATH_MAX];
+} StartupOptions;
+
+static void startup_options_init(StartupOptions *options) {
+    options->window_width = GRAPHE_DEFAULT_WINDOW_WIDTH;
+    options->window_height = GRAPHE_DEFAULT_WINDOW_HEIGHT;
+    options->window_size_set = false;
+    options->screenshot_once = false;
+    options->screenshot_path[0] = '\0';
+}
+
+static bool parse_window_size(const char *text, int *width, int *height) {
+    int parsed_width = 0;
+    int parsed_height = 0;
+    char extra = '\0';
+
+    if (sscanf(text, "%dx%d%c", &parsed_width, &parsed_height, &extra) != 2)
+        return false;
+    if (parsed_width < GRAPHE_MIN_WINDOW_WIDTH ||
+        parsed_height < GRAPHE_MIN_WINDOW_HEIGHT)
+        return false;
+
+    *width = parsed_width;
+    *height = parsed_height;
+    return true;
+}
+
+static void parse_startup_options(int argc, char **argv, StartupOptions *options) {
+    startup_options_init(options);
+
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--window-size") == 0 && i + 1 < argc) {
+            int width = 0;
+            int height = 0;
+
+            if (parse_window_size(argv[i + 1], &width, &height)) {
+                options->window_width = width;
+                options->window_height = height;
+                options->window_size_set = true;
+            }
+            i++;
+        } else if (strcmp(argv[i], "--screenshot") == 0) {
+            const char *path = GRAPHE_MANUAL_SCREENSHOT_PATH;
+
+            if (i + 1 < argc && argv[i + 1][0] != '-') {
+                path = argv[i + 1];
+                i++;
+            }
+
+            options->screenshot_once = true;
+            snprintf(options->screenshot_path, sizeof(options->screenshot_path),
+                     "%s", path);
+
+            if (!options->window_size_set) {
+                options->window_width = GRAPHE_SCREENSHOT_WINDOW_WIDTH;
+                options->window_height = GRAPHE_SCREENSHOT_WINDOW_HEIGHT;
+            }
+        }
+    }
+}
+
+static bool save_screenshot(const char *path) {
+    Image screenshot = LoadImageFromScreen();
+
+    if (screenshot.data == NULL) return false;
+
+    if (screenshot.width > GetScreenWidth() ||
+        screenshot.height > GetScreenHeight()) {
+        Rectangle viewport = {
+            0.0f,
+            (float)(screenshot.height - GetScreenHeight()),
+            (float)GetScreenWidth(),
+            (float)GetScreenHeight(),
+        };
+
+        ImageCrop(&screenshot, viewport);
+    }
+
+    bool saved = ExportImage(screenshot, path);
+    UnloadImage(screenshot);
+    return saved;
 }
 
 static Image make_generated_window_icon(int icon_size) {
@@ -407,13 +502,15 @@ static void apply_ui_result(RenderUiResult result, Graph *graph_source,
     }
 }
 
-int main(void) {
-    const int screen_width = 1180;
-    const int screen_height = 760;
+int main(int argc, char **argv) {
     const float seconds_per_step = 0.65f;
+    StartupOptions startup_options;
+
+    parse_startup_options(argc, argv, &startup_options);
 
     SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_VSYNC_HINT | FLAG_WINDOW_RESIZABLE);
-    InitWindow(screen_width, screen_height, "Graphe");
+    InitWindow(startup_options.window_width, startup_options.window_height,
+               "Graphe");
     set_window_icon();
     SetWindowMinSize(GRAPHE_MIN_WINDOW_WIDTH, GRAPHE_MIN_WINDOW_HEIGHT);
     SetTargetFPS(60);
@@ -457,6 +554,7 @@ int main(void) {
     size_t step = 0;
     Graph *base_graph = active_base_graph(&options, &graph_view, &tree_base);
     rebuild_trace(base_graph, &trace, &options, &step);
+    if (startup_options.screenshot_once) step = trace.count;
     apply_layout(base_graph, &trace, &options);
     graph_copy_node_positions(&graph_base, &graph_view);
 
@@ -522,6 +620,7 @@ int main(void) {
         }
 
         if (shortcuts_enabled && IsKeyPressed(KEY_SPACE)) playing = !playing;
+        bool screenshot_requested = shortcuts_enabled && IsKeyPressed(KEY_F12);
         if (shortcuts_enabled && IsKeyPressed(KEY_RIGHT)) {
             step_forward(&step, &trace);
             playing = false;
@@ -607,11 +706,31 @@ int main(void) {
         base_graph = active_base_graph(&options, &graph_view, &tree_base);
         traversal_trace_apply_prefix(base_graph, &trace, step, &scene_graph);
 
+        bool screenshot_pending =
+            screenshot_requested || startup_options.screenshot_once;
+        const char *screenshot_path = startup_options.screenshot_once
+                                          ? startup_options.screenshot_path
+                                          : GRAPHE_MANUAL_SCREENSHOT_PATH;
+        bool screenshot_saved = false;
+
         BeginDrawing();
         ClearBackground(render_background_color(&options));
         RenderUiResult draw_result = render_graph(
             &scene_graph, &trace, step, &render_resources, &options, &graph_camera);
+        if (screenshot_pending) screenshot_saved = save_screenshot(screenshot_path);
         EndDrawing();
+
+        if (screenshot_pending) {
+            if (screenshot_saved) {
+                snprintf(options.status_message, sizeof(options.status_message),
+                         "Saved screenshot: %.120s", screenshot_path);
+            } else {
+                snprintf(options.status_message, sizeof(options.status_message),
+                         "Could not save screenshot: %.112s", screenshot_path);
+            }
+
+            if (startup_options.screenshot_once) break;
+        }
 
         apply_ui_result(draw_result, &graph_base, &graph_view, &tree_base, &trace,
                         &options, &step, &graph_camera, &playing, &render_resources);
