@@ -3,9 +3,9 @@
 ## Current Direction
 
 Build Graphe as a native C/raylib educational visualizer for graph algorithms.
-DFS is the mature graph mode. BFS still needs separate first-class state and
-presentation. Tree traversal now has a first expression-tree prototype and
-should continue toward a dedicated tree UI.
+DFS is the mature graph mode. BFS now has first-class level/depth presentation,
+but still needs queue/frontier visualization. Tree traversal has a first
+expression-tree prototype and should continue toward a dedicated tree UI.
 
 ## Completed
 
@@ -52,12 +52,15 @@ should continue toward a dedicated tree UI.
   appears on the classification step instead of only on the following step.
 - Added a first expression-tree mode for preorder, inorder, and postorder
   traversal output.
+- Renamed the shared algorithm trace module from `dfs.*` to `traversal.*`.
+- Changed BFS presentation to show node levels and a depth gradient instead of
+  presenting DFS-style edge classifications.
 
 ## Next Steps
 
 - Split the runtime modes explicitly:
   - DFS: discovery/finish times, node colors, and edge classification.
-  - BFS: depth/level, queue/frontier state, and BFS tree edges.
+  - BFS: queue/frontier state and clearer BFS tree emphasis.
   - Tree traversal: continue replacing graph-specific UI with tree-specific
     controls and expression output.
 - Replace fixed graph/event limits with dynamic storage before adding loading or
@@ -68,7 +71,8 @@ should continue toward a dedicated tree UI.
   self-loop support.
 - Continue UI polish inside the native window: spacing, settings grouping, and
   cross-platform visual checks.
-- Add focused tests for traversal timestamps and edge classifications.
+- Add focused tests for traversal timestamps, BFS levels, and edge
+  classifications.
 - Add optional Graphviz layout import using `dot` or `neato` output.
 
 ## Deferred

@@ -149,6 +149,32 @@ Color render_background_color(const RenderOptions *options) {
     return theme_for_options(options).background;
 }
 
+static unsigned char color_mix_channel(unsigned char from, unsigned char to,
+                                       float amount) {
+    return (unsigned char)((float)from + ((float)to - (float)from) * amount);
+}
+
+static Color color_mix(Color from, Color to, float amount) {
+    if (amount < 0.0f) amount = 0.0f;
+    if (amount > 1.0f) amount = 1.0f;
+
+    return (Color){
+        color_mix_channel(from.r, to.r, amount),
+        color_mix_channel(from.g, to.g, amount),
+        color_mix_channel(from.b, to.b, amount),
+        color_mix_channel(from.a, to.a, amount),
+    };
+}
+
+static bool color_is_dark(Color color) {
+    int luminance = (int)color.r * 299 + (int)color.g * 587 + (int)color.b * 114;
+    return luminance < 140000;
+}
+
+static Color node_text_color(Color fill) {
+    return color_is_dark(fill) ? RAYWHITE : (Color){0, 0, 0, 255};
+}
+
 static Color node_fill_color(const Theme *theme, NodeColor color) {
     switch (color) {
     case NODE_WHITE:
@@ -160,6 +186,20 @@ static Color node_fill_color(const Theme *theme, NodeColor color) {
     default:
         return theme->node_white;
     }
+}
+
+static Color bfs_level_fill_color(const Theme *theme, const Node *node,
+                                  int max_level) {
+    if (node->level < 0) return theme->node_white;
+    if (max_level <= 0) return theme->node_gray;
+
+    Color shallow = theme->edge_tree;
+    Color middle = theme->node_gray;
+    Color deep = theme->edge_forward;
+    float amount = (float)node->level / (float)max_level;
+
+    if (amount <= 0.5f) return color_mix(shallow, middle, amount * 2.0f);
+    return color_mix(middle, deep, (amount - 0.5f) * 2.0f);
 }
 
 static Color edge_color(const Theme *theme, EdgeType type) {
@@ -176,6 +216,44 @@ static Color edge_color(const Theme *theme, EdgeType type) {
     default:
         return theme->edge_unclassified;
     }
+}
+
+static Color edge_render_color(const Theme *theme, EdgeType type,
+                               const RenderOptions *options) {
+    if (options->algorithm_mode == ALGORITHM_BFS) return theme->edge_unclassified;
+    return edge_color(theme, type);
+}
+
+static int max_bfs_level(const Graph *graph) {
+    int max_level = 0;
+
+    for (size_t i = 0; i < graph->node_count; i++) {
+        if (graph->nodes[i].level > max_level) max_level = graph->nodes[i].level;
+    }
+
+    return max_level;
+}
+
+static int max_bfs_trace_level(const Trace *trace) {
+    int max_level = 0;
+
+    for (size_t i = 0; i < trace->count; i++) {
+        const TraceEvent *event = &trace->events[i];
+        if (event->type != TRACE_EVENT_DISCOVER_NODE) continue;
+        if (event->time > max_level) max_level = event->time;
+    }
+
+    return max_level;
+}
+
+static int node_count_with_level(const Graph *graph) {
+    int count = 0;
+
+    for (size_t i = 0; i < graph->node_count; i++) {
+        if (graph->nodes[i].level >= 0) count++;
+    }
+
+    return count;
 }
 
 static Vector2 vector_add(Vector2 a, Vector2 b) {
@@ -410,8 +488,10 @@ static void draw_edge_body(const Graph *graph, size_t edge_index, int active,
                            int active_examine, const Theme *theme,
                            const RenderOptions *options) {
     EdgeGeometry geometry = make_edge_geometry(graph, edge_index, active, options);
-    Color color = active_examine ? theme->active
-                                 : edge_color(theme, graph->edges[edge_index].type);
+    Color color =
+        active_examine
+            ? theme->active
+            : edge_render_color(theme, graph->edges[edge_index].type, options);
     float thickness = active ? 5.0f : 2.5f;
     Vector2 end = graph->directed ? edge_body_arrow_endpoint(geometry.end,
                                                              geometry.end_direction)
@@ -429,8 +509,10 @@ static void draw_edge_arrow(const Graph *graph, size_t edge_index, int active,
                             int active_examine, const Theme *theme,
                             const RenderOptions *options) {
     EdgeGeometry geometry = make_edge_geometry(graph, edge_index, active, options);
-    Color color = active_examine ? theme->active
-                                 : edge_color(theme, graph->edges[edge_index].type);
+    Color color =
+        active_examine
+            ? theme->active
+            : edge_render_color(theme, graph->edges[edge_index].type, options);
 
     draw_arrowhead(geometry.end, geometry.end_direction, color);
 }
@@ -459,12 +541,29 @@ static void draw_time_label(const RenderResources *resources, const Node *node,
               15.0f, color);
 }
 
+static void draw_level_label(const RenderResources *resources, const Node *node,
+                             Color color) {
+    if (node->level < 0) return;
+
+    char level[16];
+    snprintf(level, sizeof(level), "L%d", node->level);
+    Vector2 size = measure_text(resources, level, 15.0f);
+    draw_text(resources, level, (Vector2){node->x - size.x * 0.5f, node->y + 7.0f},
+              15.0f, color);
+}
+
 static void draw_node(const RenderResources *resources, const Node *node, int active,
-                      const Theme *theme, const RenderOptions *options) {
+                      const Theme *theme, const RenderOptions *options,
+                      int max_level) {
     Vector2 center = {node->x, node->y};
-    Color fill = node_fill_color(theme, node->color);
+    bool show_times = options->algorithm_mode == ALGORITHM_DFS;
+    bool show_level = options->algorithm_mode == ALGORITHM_BFS;
+    Color fill = show_level ? bfs_level_fill_color(theme, node, max_level)
+                            : node_fill_color(theme, node->color);
     Color outline = active ? theme->active : theme->node_outline;
-    Color label_color = node->color == NODE_BLACK ? RAYWHITE : (Color){0, 0, 0, 255};
+    Color label_color = show_level                  ? node_text_color(fill)
+                        : node->color == NODE_BLACK ? RAYWHITE
+                                                    : (Color){0, 0, 0, 255};
     Color time_color = label_color;
     Vector2 label_size = measure_text(resources, node->label, 24.0f);
 
@@ -480,13 +579,13 @@ static void draw_node(const RenderResources *resources, const Node *node, int ac
                  0, 360, 64, theme->active);
     // DrawCircleLinesV(center, GRAPHE_NODE_RADIUS + 5.0f, theme->active);
 
-    bool show_times = options->algorithm_mode == ALGORITHM_DFS;
-    float label_y =
-        show_times ? node->y - label_size.y + 3.0f : node->y - label_size.y * 0.5f;
+    float label_y = show_times || show_level ? node->y - label_size.y + 3.0f
+                                             : node->y - label_size.y * 0.5f;
 
     draw_text(resources, node->label,
               (Vector2){node->x - label_size.x * 0.5f, label_y}, 24.0f, label_color);
     if (show_times) draw_time_label(resources, node, time_color);
+    if (show_level) draw_level_label(resources, node, time_color);
 }
 
 static const char *event_type_name(TraceEventType type) {
@@ -562,9 +661,50 @@ static void describe_event(const Graph *graph, const Trace *trace,
                      tree_traversal_order_name(options->tree_order), output);
         } else {
             // snprintf(buffer, buffer_size, "traverse %s -> %s   %s: %s",
-            snprintf(buffer, buffer_size, "%s: %s",
-                     // graph->nodes[event->from].label, graph->nodes[event->to].label,
-                     tree_traversal_order_name(options->tree_order), output);
+            snprintf(
+                buffer, buffer_size, "%s: %s",
+                // graph->nodes[event->from].label, graph->nodes[event->to].label,
+                tree_traversal_order_name(options->tree_order), output);
+        }
+        return;
+    }
+
+    if (options->algorithm_mode == ALGORITHM_BFS) {
+        switch (event->type) {
+        case TRACE_EVENT_DISCOVER_NODE:
+            snprintf(buffer, buffer_size, "discover %s at level %d",
+                     graph->nodes[event->node].label, event->time);
+            break;
+        case TRACE_EVENT_FINISH_NODE: {
+            int level = graph->nodes[event->node].level;
+            if (level >= 0) {
+                snprintf(buffer, buffer_size, "finish %s at level %d",
+                         graph->nodes[event->node].label, level);
+            } else {
+                snprintf(buffer, buffer_size, "finish %s",
+                         graph->nodes[event->node].label);
+            }
+            break;
+        }
+        case TRACE_EVENT_EXAMINE_EDGE: {
+            int level = graph->nodes[event->from].level;
+            snprintf(buffer, buffer_size, "scan %s %s %s from level %d",
+                     graph->nodes[event->from].label, graph->directed ? "->" : "-",
+                     graph->nodes[event->to].label, level);
+            break;
+        }
+        case TRACE_EVENT_CLASSIFY_EDGE:
+            if (event->edge_type == EDGE_TREE) {
+                snprintf(buffer, buffer_size, "enqueue %s at level %d",
+                         graph->nodes[event->to].label, event->time);
+            } else {
+                snprintf(buffer, buffer_size, "%s already reached at level %d",
+                         graph->nodes[event->to].label, event->time);
+            }
+            break;
+        default:
+            snprintf(buffer, buffer_size, "Unknown BFS event");
+            break;
         }
         return;
     }
@@ -646,40 +786,47 @@ static void apply_gui_style(const RenderResources *resources,
     GuiSetStyle(TEXTBOX, TEXT_PADDING, padding);
 }
 
-static void gui_option_toggle(const RenderOptions *options, const Theme *theme,
-                              Rectangle bounds, const char *text, bool *active) {
-    (void)options;
+static bool rounded_button(const RenderResources *resources,
+                           const RenderOptions *options, const Theme *theme,
+                           Rectangle bounds, const char *text, bool active) {
+    Vector2 mouse = GetMousePosition();
+    bool hovered = CheckCollisionPointRec(mouse, bounds);
+    Color base = active ? theme->button_active : theme->button;
+    Color fill = hovered ? lighten_color(base, 0.10f) : base;
+    Color border =
+        active ? lighten_color(theme->button_active, 0.18f) : theme->panel_border;
+    float text_size = ui_size(options, 16.0f);
+    Vector2 text_size_px = measure_text(resources, text, text_size);
 
-    bool was_active = active != NULL && *active;
-    bool hovered = CheckCollisionPointRec(GetMousePosition(), bounds);
-    Color off_hover = lighten_color(theme->button, 0.12f);
-    Color active_hover =
-        hovered ? lighten_color(theme->button_active, 0.10f) : theme->button_active;
-    Color focused_color = was_active ? active_hover : off_hover;
-    Color pressed_color =
-        was_active ? active_hover : lighten_color(theme->button_active, 0.10f);
+    DrawRectangleRounded(bounds, 0.22f, 8, fill);
+    DrawRectangleRoundedLines(bounds, 0.22f, 8, border);
+    draw_text(resources, text,
+              (Vector2){bounds.x + (bounds.width - text_size_px.x) * 0.5f,
+                        bounds.y + (bounds.height - text_size_px.y) * 0.5f -
+                            ui_size(options, 1.0f)},
+              text_size, theme->text);
 
-    GuiSetStyle(TOGGLE, BASE_COLOR_NORMAL, gui_color(theme->button));
-    GuiSetStyle(TOGGLE, BASE_COLOR_FOCUSED, gui_color(focused_color));
-    GuiSetStyle(TOGGLE, BASE_COLOR_PRESSED, gui_color(pressed_color));
-    GuiToggle(bounds, text, active);
+    return hovered && IsMouseButtonReleased(MOUSE_LEFT_BUTTON);
 }
 
-static bool gui_option_button(const RenderOptions *options, const Theme *theme,
-                              Rectangle bounds, const char *text) {
-    (void)options;
+static bool rounded_choice_button(const RenderResources *resources,
+                                  const RenderOptions *options, const Theme *theme,
+                                  Rectangle bounds, const char *text, bool active) {
+    Vector2 mouse = GetMousePosition();
+    bool hovered = CheckCollisionPointRec(mouse, bounds);
+    Color base = active ? theme->button_active : theme->button;
+    Color fill = hovered ? lighten_color(base, 0.10f) : base;
+    Color border =
+        active ? lighten_color(theme->button_active, 0.16f) : theme->panel_border;
 
-    GuiSetStyle(BUTTON, BASE_COLOR_NORMAL, gui_color(theme->button));
-    GuiSetStyle(BUTTON, BASE_COLOR_FOCUSED,
-                gui_color(lighten_color(theme->button, 0.12f)));
-    GuiSetStyle(BUTTON, BASE_COLOR_PRESSED,
-                gui_color(lighten_color(theme->button_active, 0.10f)));
-    return GuiButton(bounds, text);
-}
+    DrawRectangleRounded(bounds, 0.14f, 8, fill);
+    DrawRectangleRoundedLines(bounds, 0.14f, 8, border);
+    draw_text(resources, text,
+              (Vector2){bounds.x + ui_size(options, 16.0f),
+                        bounds.y + ui_size(options, 8.0f)},
+              ui_size(options, 16.0f), theme->text);
 
-static bool option_clicked(Rectangle bounds) {
-    return IsMouseButtonReleased(MOUSE_LEFT_BUTTON) &&
-           CheckCollisionPointRec(GetMousePosition(), bounds);
+    return hovered && IsMouseButtonReleased(MOUSE_LEFT_BUTTON);
 }
 
 static Rectangle sidebar_rect(const RenderOptions *options, float x, float y,
@@ -690,60 +837,8 @@ static Rectangle sidebar_rect(const RenderOptions *options, float x, float y,
 }
 
 static Rectangle settings_button_rect(const RenderOptions *options) {
-    return sidebar_rect(options, GRAPHE_SIDEBAR_WIDTH - 96.0f, 28.0f, 68.0f, 36.0f);
-}
-
-static Rectangle settings_panel_rect(const RenderOptions *options) {
-    float graph_width = render_graph_area_width(options);
-    float margin = ui_size(options, 34.0f);
-    float width = ui_size(options, 520.0f);
-    float max_width = graph_width - margin * 2.0f;
-    float min_width = ui_size(options, 340.0f);
-
-    if (max_width < min_width) min_width = max_width;
-    if (width > max_width) width = max_width;
-    if (width < min_width) width = min_width;
-
-    float height = ui_size(options, 620.0f);
-    float max_height = (float)GetScreenHeight() - ui_size(options, 48.0f);
-    if (height > max_height) height = max_height;
-
-    return (Rectangle){(graph_width - width) * 0.5f, ui_size(options, 24.0f), width,
-                       height};
-}
-
-static Rectangle option_rect(const RenderOptions *options, int index) {
-    Rectangle panel = settings_panel_rect(options);
-    return (Rectangle){panel.x + ui_size(options, 28.0f),
-                       panel.y + ui_size(options, 82.0f + (float)index * 31.0f),
-                       panel.width - ui_size(options, 56.0f),
-                       ui_size(options, 29.0f)};
-}
-
-static Rectangle scale_button_rect(const RenderOptions *options, int index) {
-    Rectangle row = option_rect(options, 12);
-    float width = ui_size(options, 48.0f);
-    float gap = ui_size(options, 8.0f);
-    float x =
-        row.x + row.width - width * (float)(2 - index) - gap * (float)(1 - index);
-
-    return (Rectangle){x, row.y, width, row.height};
-}
-
-static Rectangle graph_path_textbox_rect(const RenderOptions *options) {
-    Rectangle row = option_rect(options, 14);
-    float button_width = ui_size(options, 86.0f);
-    float gap = ui_size(options, 10.0f);
-
-    return (Rectangle){row.x, row.y, row.width - button_width - gap, row.height};
-}
-
-static Rectangle graph_load_button_rect(const RenderOptions *options) {
-    Rectangle row = option_rect(options, 14);
-    float button_width = ui_size(options, 86.0f);
-
-    return (Rectangle){row.x + row.width - button_width, row.y, button_width,
-                       row.height};
+    float sidebar_width = render_sidebar_width(options) / ui_pixel_scale(options);
+    return sidebar_rect(options, sidebar_width - 130.0f, 28.0f, 102.0f, 38.0f);
 }
 
 RenderUiResult render_update_options(RenderOptions *options) {
@@ -785,183 +880,208 @@ static void merge_ui_result(RenderUiResult *result, RenderUiResult update) {
         result->graph_load_requested || update.graph_load_requested;
 }
 
+static void draw_settings_section(const RenderResources *resources,
+                                  const RenderOptions *options, const Theme *theme,
+                                  Rectangle bounds, const char *title) {
+    DrawRectangleRounded(bounds, 0.04f, 8, theme->panel);
+    DrawRectangleRoundedLines(bounds, 0.04f, 8, theme->panel_border);
+    draw_text(resources, title,
+              (Vector2){bounds.x + ui_size(options, 20.0f),
+                        bounds.y + ui_size(options, 17.0f)},
+              ui_size(options, 21.0f), theme->text);
+}
+
+static Rectangle settings_section_row(const RenderOptions *options,
+                                      Rectangle section, int row) {
+    float pad = ui_size(options, 20.0f);
+    float row_height = ui_size(options, 32.0f);
+    float row_gap = ui_size(options, 8.0f);
+
+    return (Rectangle){
+        section.x + pad,
+        section.y + ui_size(options, 52.0f) + (row_height + row_gap) * (float)row,
+        section.width - pad * 2.0f, row_height};
+}
+
 static RenderUiResult draw_settings(const RenderResources *resources,
                                     RenderOptions *options, const Theme *theme) {
     RenderUiResult result = {0};
-    Rectangle panel = settings_panel_rect(options);
-    Vector2 mouse = GetMousePosition();
+    float screen_width = (float)GetScreenWidth();
+    float margin = ui_size(options, 48.0f);
+    float max_content_width = ui_size(options, 1040.0f);
+    float content_width = screen_width - margin * 2.0f;
 
-    DrawRectangle(0, 0, (int)render_graph_area_width(options),
-                  (int)render_graph_area_height(), theme->overlay);
-    GuiPanel(panel, NULL);
+    if (content_width > max_content_width) content_width = max_content_width;
 
-    draw_text(resources, "Settings",
-              (Vector2){panel.x + ui_size(options, 28.0f),
-                        panel.y + ui_size(options, 24.0f)},
-              ui_size(options, 27.0f), theme->text);
-    draw_text(resources, "Appearance and traversal options",
-              (Vector2){panel.x + ui_size(options, 28.0f),
-                        panel.y + ui_size(options, 56.0f)},
-              ui_size(options, 16.0f), theme->muted_text);
+    float content_x = (screen_width - content_width) * 0.5f;
+    float top = ui_size(options, 96.0f);
+    float column_gap = ui_size(options, 24.0f);
+    float column_width = (content_width - column_gap) * 0.5f;
+    Rectangle algorithms = {content_x, top, column_width, ui_size(options, 178.0f)};
+    Rectangle layouts = {content_x, algorithms.y + algorithms.height + column_gap,
+                         column_width, ui_size(options, 166.0f)};
+    Rectangle utilities = {content_x + column_width + column_gap, top, column_width,
+                           ui_size(options, 238.0f)};
+    Rectangle graph_options = {utilities.x,
+                               utilities.y + utilities.height + column_gap,
+                               column_width, ui_size(options, 144.0f)};
+    Rectangle close_button = {screen_width - margin - ui_size(options, 104.0f),
+                              ui_size(options, 29.0f), ui_size(options, 104.0f),
+                              ui_size(options, 38.0f)};
 
-    bool dark = options->dark_mode;
-    gui_option_toggle(options, theme, option_rect(options, 0),
-                      options->dark_mode ? "Dark mode: on" : "Dark mode: off",
-                      &dark);
-    if (dark != options->dark_mode) {
-        options->dark_mode = dark;
+    DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), theme->background);
+
+    draw_text(resources, "Settings", (Vector2){margin, ui_size(options, 33.0f)},
+              ui_size(options, 30.0f), theme->text);
+    // draw_text(resources,
+    //           "Configure the visualizer without the graph competing for space",
+    //           (Vector2){margin, ui_size(options, 61.0f)}, ui_size(options, 16.0f),
+    //           theme->muted_text);
+
+    if (rounded_button(resources, options, theme, close_button, "Close", false)) {
+        options->settings_open = false;
         result.consumed_click = true;
     }
 
-    bool alphabetical = options->alphabetical_order;
-    gui_option_toggle(options, theme, option_rect(options, 1),
-                      options->alphabetical_order ? "Traversal order: alphabetical"
-                                                  : "Traversal order: insertion",
-                      &alphabetical);
-    if (alphabetical != options->alphabetical_order) {
-        options->alphabetical_order = alphabetical;
-        result.trace_changed = true;
-        result.consumed_click = true;
-    }
+    // DrawLine(0, (int)ui_size(options, 84.0f), GetScreenWidth(),
+    //          (int)ui_size(options, 84.0f), theme->panel_border);
 
-    bool directed = options->directed_graph;
-    gui_option_toggle(
-        options, theme, option_rect(options, 2),
-        options->directed_graph ? "Graph: directed" : "Graph: undirected",
-        &directed);
-    if (directed != options->directed_graph) {
-        options->directed_graph = directed;
-        result.trace_changed = true;
-        result.consumed_click = true;
-    }
-
-    bool dfs = options->algorithm_mode == ALGORITHM_DFS;
-    gui_option_toggle(options, theme, option_rect(options, 3), "Algorithm: DFS",
-                      &dfs);
-    if (dfs && options->algorithm_mode != ALGORITHM_DFS) {
+    draw_settings_section(resources, options, theme, algorithms, "Algorithm");
+    if (rounded_choice_button(resources, options, theme,
+                              settings_section_row(options, algorithms, 0),
+                              "DFS: times and edge classes",
+                              options->algorithm_mode == ALGORITHM_DFS) &&
+        options->algorithm_mode != ALGORITHM_DFS) {
         options->algorithm_mode = ALGORITHM_DFS;
         result.trace_changed = true;
         result.consumed_click = true;
     }
-
-    bool bfs = options->algorithm_mode == ALGORITHM_BFS;
-    gui_option_toggle(options, theme, option_rect(options, 4), "Algorithm: BFS",
-                      &bfs);
-    if (bfs && options->algorithm_mode != ALGORITHM_BFS) {
+    if (rounded_choice_button(
+            resources, options, theme, settings_section_row(options, algorithms, 1),
+            "BFS: levels and depth", options->algorithm_mode == ALGORITHM_BFS) &&
+        options->algorithm_mode != ALGORITHM_BFS) {
         options->algorithm_mode = ALGORITHM_BFS;
         result.trace_changed = true;
         result.consumed_click = true;
     }
-
-    bool tree = options->algorithm_mode == ALGORITHM_TREE;
-    gui_option_toggle(options, theme, option_rect(options, 5),
-                      "Algorithm: tree traversal", &tree);
-    if (tree && options->algorithm_mode != ALGORITHM_TREE) {
+    if (rounded_choice_button(resources, options, theme,
+                              settings_section_row(options, algorithms, 2),
+                              "Tree traversal: expression output",
+                              options->algorithm_mode == ALGORITHM_TREE) &&
+        options->algorithm_mode != ALGORITHM_TREE) {
         options->algorithm_mode = ALGORITHM_TREE;
         result.trace_changed = true;
         result.consumed_click = true;
     }
 
-    Rectangle preorder_rect = option_rect(options, 6);
-    bool preorder = options->tree_order == TREE_ORDER_PREORDER;
-    gui_option_toggle(options, theme, preorder_rect, "Tree: preorder", &preorder);
-    if (option_clicked(preorder_rect)) {
-        options->tree_order = TREE_ORDER_PREORDER;
-        options->algorithm_mode = ALGORITHM_TREE;
-        result.trace_changed = true;
-        result.consumed_click = true;
-    }
-
-    Rectangle inorder_rect = option_rect(options, 7);
-    bool inorder = options->tree_order == TREE_ORDER_INORDER;
-    gui_option_toggle(options, theme, inorder_rect, "Tree: inorder", &inorder);
-    if (option_clicked(inorder_rect)) {
-        options->tree_order = TREE_ORDER_INORDER;
-        options->algorithm_mode = ALGORITHM_TREE;
-        result.trace_changed = true;
-        result.consumed_click = true;
-    }
-
-    Rectangle postorder_rect = option_rect(options, 8);
-    bool postorder = options->tree_order == TREE_ORDER_POSTORDER;
-    gui_option_toggle(options, theme, postorder_rect, "Tree: postorder", &postorder);
-    if (option_clicked(postorder_rect)) {
-        options->tree_order = TREE_ORDER_POSTORDER;
-        options->algorithm_mode = ALGORITHM_TREE;
-        result.trace_changed = true;
-        result.consumed_click = true;
-    }
-
-    bool forest = options->layout_mode == LAYOUT_TRACE_FOREST;
-    gui_option_toggle(options, theme, option_rect(options, 9),
-                      "Layout: traversal forest", &forest);
-    if (forest && options->layout_mode != LAYOUT_TRACE_FOREST) {
+    draw_settings_section(resources, options, theme, layouts, "Layout");
+    if (rounded_choice_button(
+            resources, options, theme, settings_section_row(options, layouts, 0),
+            "Traversal forest", options->layout_mode == LAYOUT_TRACE_FOREST) &&
+        options->layout_mode != LAYOUT_TRACE_FOREST) {
         options->layout_mode = LAYOUT_TRACE_FOREST;
         result.layout_changed = true;
         result.consumed_click = true;
     }
-
-    bool circular = options->layout_mode == LAYOUT_CIRCULAR;
-    gui_option_toggle(options, theme, option_rect(options, 10), "Layout: circular",
-                      &circular);
-    if (circular && options->layout_mode != LAYOUT_CIRCULAR) {
+    if (rounded_choice_button(
+            resources, options, theme, settings_section_row(options, layouts, 1),
+            "Circular layout", options->layout_mode == LAYOUT_CIRCULAR) &&
+        options->layout_mode != LAYOUT_CIRCULAR) {
         options->layout_mode = LAYOUT_CIRCULAR;
         result.layout_changed = true;
         result.consumed_click = true;
     }
+    draw_text(resources, "Dragging a node switches to manual layout.",
+              (Vector2){layouts.x + ui_size(options, 20.0f),
+                        layouts.y + ui_size(options, 136.0f)},
+              ui_size(options, 16.0f), theme->muted_text);
 
-    bool manual = options->layout_mode == LAYOUT_MANUAL;
-    gui_option_toggle(options, theme, option_rect(options, 11), "Layout: manual",
-                      &manual);
-    if (manual && options->layout_mode != LAYOUT_MANUAL) {
-        options->layout_mode = LAYOUT_MANUAL;
-        result.layout_changed = true;
+    draw_settings_section(resources, options, theme, utilities, "Utilities");
+    if (rounded_choice_button(
+            resources, options, theme, settings_section_row(options, utilities, 0),
+            options->dark_mode ? "Dark mode: on" : "Dark mode: off",
+            options->dark_mode)) {
+        options->dark_mode = !options->dark_mode;
         result.consumed_click = true;
     }
 
-    Rectangle scale_row = option_rect(options, 12);
+    Rectangle scale_row = settings_section_row(options, utilities, 1);
     char scale_text[64];
     snprintf(scale_text, sizeof(scale_text), "UI scale: %.0f%%",
              ui_scale_value(options) * 100.0f);
     draw_text(resources, scale_text,
-              (Vector2){scale_row.x, scale_row.y + ui_size(options, 8.0f)},
+              (Vector2){scale_row.x + ui_size(options, 16.0f),
+                        scale_row.y + ui_size(options, 8.0f)},
               ui_size(options, 16.0f), theme->text);
 
-    if (gui_option_button(options, theme, scale_button_rect(options, 0), "-")) {
+    Rectangle minus_button = {
+        scale_row.x + scale_row.width - ui_size(options, 104.0f), scale_row.y,
+        ui_size(options, 46.0f), scale_row.height};
+    Rectangle plus_button = {scale_row.x + scale_row.width - ui_size(options, 46.0f),
+                             scale_row.y, ui_size(options, 46.0f), scale_row.height};
+    if (rounded_button(resources, options, theme, minus_button, "-", false)) {
         if (change_ui_scale(options, -0.08f)) result.layout_changed = true;
         result.consumed_click = true;
     }
-    if (gui_option_button(options, theme, scale_button_rect(options, 1), "+")) {
+    if (rounded_button(resources, options, theme, plus_button, "+", false)) {
         if (change_ui_scale(options, 0.08f)) result.layout_changed = true;
         result.consumed_click = true;
     }
 
-    Rectangle import_label = option_rect(options, 13);
+    Rectangle import_label = settings_section_row(options, utilities, 2);
     draw_text(resources, "Import graph file",
-              (Vector2){import_label.x, import_label.y + ui_size(options, 8.0f)},
+              (Vector2){import_label.x, import_label.y + ui_size(options, 7.0f)},
               ui_size(options, 16.0f), theme->text);
 
-    Rectangle path_box = graph_path_textbox_rect(options);
+    Rectangle import_row = settings_section_row(options, utilities, 3);
+    float load_width = ui_size(options, 94.0f);
+    Rectangle path_box = {import_row.x, import_row.y,
+                          import_row.width - load_width - ui_size(options, 10.0f),
+                          import_row.height};
+    Rectangle load_button = {path_box.x + path_box.width + ui_size(options, 10.0f),
+                             import_row.y, load_width, import_row.height};
+
     if (GuiTextBox(path_box, options->graph_path, GRAPHE_GRAPH_PATH_MAX,
                    options->graph_path_editing)) {
         options->graph_path_editing = !options->graph_path_editing;
         result.consumed_click = true;
     }
-
-    if (gui_option_button(options, theme, graph_load_button_rect(options), "Load")) {
+    if (options->graph_file_dirty && !options->graph_path_editing) {
+        draw_text(resources, "*",
+                  (Vector2){path_box.x + path_box.width - ui_size(options, 20.0f),
+                            path_box.y + ui_size(options, 5.0f)},
+                  ui_size(options, 22.0f), theme->active);
+    }
+    if (rounded_button(resources, options, theme, load_button, "Load", false)) {
         result.graph_load_requested = true;
         result.consumed_click = true;
     }
 
     if (options->status_message[0] != '\0') {
-        Rectangle status_row = option_rect(options, 15);
         draw_text(resources, options->status_message,
-                  (Vector2){status_row.x, status_row.y + ui_size(options, 8.0f)},
-                  ui_size(options, 15.0f), theme->muted_text);
+                  (Vector2){import_row.x, import_row.y + import_row.height +
+                                              ui_size(options, 9.0f)},
+                  ui_size(options, 14.0f), theme->muted_text);
     }
 
-    if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) &&
-        render_point_in_graph_canvas(mouse, options)) {
+    draw_settings_section(resources, options, theme, graph_options, "Graph Options");
+    if (rounded_choice_button(resources, options, theme,
+                              settings_section_row(options, graph_options, 0),
+                              options->alphabetical_order
+                                  ? "Traversal order: alphabetical"
+                                  : "Traversal order: insertion",
+                              options->alphabetical_order)) {
+        options->alphabetical_order = !options->alphabetical_order;
+        result.trace_changed = true;
+        result.consumed_click = true;
+    }
+    if (rounded_choice_button(
+            resources, options, theme,
+            settings_section_row(options, graph_options, 1),
+            options->directed_graph ? "Graph: directed" : "Graph: undirected",
+            options->directed_graph)) {
+        options->directed_graph = !options->directed_graph;
+        result.trace_changed = true;
         result.consumed_click = true;
     }
 
@@ -1083,11 +1203,11 @@ static RenderUiResult draw_sidebar(const Graph *graph, const Trace *trace,
     DrawLine((int)sidebar_left(options), 0, (int)sidebar_left(options),
              GetScreenHeight(), theme->panel_border);
 
-    draw_text(resources, "Graphe", (Vector2){x, y}, ui_size(options, 30.0f),
+    draw_text(resources, "Graphe", (Vector2){x, y}, ui_size(options, 34.0f),
               theme->text);
 
-    if (gui_option_button(options, theme, settings_button_rect(options),
-                          options->settings_open ? "Close" : "Menu")) {
+    if (rounded_button(resources, options, theme, settings_button_rect(options),
+                       "Settings", false)) {
         options->settings_open = !options->settings_open;
         result.consumed_click = true;
     }
@@ -1103,6 +1223,13 @@ static RenderUiResult draw_sidebar(const Graph *graph, const Trace *trace,
         snprintf(order_text, sizeof(order_text), "Tree order: %s",
                  tree_traversal_order_name(options->tree_order));
         draw_text(resources, order_text, (Vector2){x, y + line * 4.45f},
+                  ui_size(options, 19.0f), theme->muted_text);
+    } else if (options->algorithm_mode == ALGORITHM_BFS) {
+        char level_text[80];
+        snprintf(level_text, sizeof(level_text), "Reached: %d/%d, max level: %d",
+                 node_count_with_level(graph), (int)graph->node_count,
+                 max_bfs_level(graph));
+        draw_text(resources, level_text, (Vector2){x, y + line * 4.45f},
                   ui_size(options, 19.0f), theme->muted_text);
     } else {
         draw_text(resources, layout_text, (Vector2){x, y + line * 4.45f},
@@ -1128,7 +1255,47 @@ static RenderUiResult draw_sidebar(const Graph *graph, const Trace *trace,
     draw_text(resources, "Tab: settings", (Vector2){x, y + line * 12.95f},
               ui_size(options, 19.0f), theme->muted_text);
 
-    if (options->algorithm_mode == ALGORITHM_TREE) return result;
+    if (options->algorithm_mode == ALGORITHM_TREE) {
+        float inner_width = sidebar_width - ui_size(options, 56.0f);
+        float gap = ui_size(options, 8.0f);
+        float button_width = (inner_width - gap * 2.0f) / 3.0f;
+        float button_y = y + line * 16.0f;
+
+        draw_text(resources, "Traversal Order", (Vector2){x, y + line * 15.0f},
+                  ui_size(options, 22.0f), theme->text);
+
+        Rectangle preorder = {x, button_y, button_width, ui_size(options, 34.0f)};
+        Rectangle inorder = {x + button_width + gap, button_y, button_width,
+                             ui_size(options, 34.0f)};
+        Rectangle postorder = {x + (button_width + gap) * 2.0f, button_y,
+                               button_width, ui_size(options, 34.0f)};
+
+        if (rounded_button(resources, options, theme, preorder, "Pre",
+                           options->tree_order == TREE_ORDER_PREORDER) &&
+            options->tree_order != TREE_ORDER_PREORDER) {
+            options->tree_order = TREE_ORDER_PREORDER;
+            result.trace_changed = true;
+            result.consumed_click = true;
+        }
+        if (rounded_button(resources, options, theme, inorder, "In",
+                           options->tree_order == TREE_ORDER_INORDER) &&
+            options->tree_order != TREE_ORDER_INORDER) {
+            options->tree_order = TREE_ORDER_INORDER;
+            result.trace_changed = true;
+            result.consumed_click = true;
+        }
+        if (rounded_button(resources, options, theme, postorder, "Post",
+                           options->tree_order == TREE_ORDER_POSTORDER) &&
+            options->tree_order != TREE_ORDER_POSTORDER) {
+            options->tree_order = TREE_ORDER_POSTORDER;
+            result.trace_changed = true;
+            result.consumed_click = true;
+        }
+
+        return result;
+    }
+
+    if (options->algorithm_mode != ALGORITHM_DFS) return result;
 
     draw_text(resources, "Edge Types", (Vector2){x, y + line * 15.0f},
               ui_size(options, 22.0f), theme->text);
@@ -1157,8 +1324,15 @@ RenderUiResult render_graph(const Graph *graph, const Trace *trace,
     Theme theme = theme_for_options(options);
     size_t active_index =
         applied_event_count == 0 ? trace->count : applied_event_count - 1;
+    int bfs_max_level = max_bfs_trace_level(trace);
 
     apply_gui_style(resources, options, &theme);
+
+    if (options->settings_open) {
+        merge_ui_result(&result, draw_settings(resources, options, &theme));
+        DrawRectangle(0, 0, GetScreenWidth(), 1, theme.panel_border);
+        return result;
+    }
 
     draw_graph_word_background(resources, options, &theme);
 
@@ -1175,7 +1349,8 @@ RenderUiResult render_graph(const Graph *graph, const Trace *trace,
 
     for (size_t i = 0; i < graph->node_count; i++)
         draw_node(resources, &graph->nodes[i],
-                  is_active_node(trace, active_index, i), &theme, options);
+                  is_active_node(trace, active_index, i), &theme, options,
+                  bfs_max_level);
 
     if (graph->directed) {
         for (size_t i = 0; i < graph->edge_count; i++) {
@@ -1193,8 +1368,6 @@ RenderUiResult render_graph(const Graph *graph, const Trace *trace,
 
     merge_ui_result(&result, draw_sidebar(graph, trace, applied_event_count,
                                           resources, options, &theme));
-    if (options->settings_open)
-        merge_ui_result(&result, draw_settings(resources, options, &theme));
 
     DrawRectangle(0, 0, GetScreenWidth(), 1, theme.panel_border);
 

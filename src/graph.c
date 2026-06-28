@@ -60,6 +60,7 @@ int graph_add_node(Graph *graph, const char *label) {
     node->y = 0.0f;
     node->discover_time = -1;
     node->finish_time = -1;
+    node->level = -1;
     node->color = NODE_WHITE;
     graph->next_alpha_node[node_index] = -1;
     graph->first_out[node_index] = -1;
@@ -273,6 +274,7 @@ void graph_reset_visual_state(Graph *graph) {
     for (size_t i = 0; i < graph->node_count; i++) {
         graph->nodes[i].discover_time = -1;
         graph->nodes[i].finish_time = -1;
+        graph->nodes[i].level = -1;
         graph->nodes[i].color = NODE_WHITE;
     }
 

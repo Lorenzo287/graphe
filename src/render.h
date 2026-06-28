@@ -28,6 +28,8 @@ typedef struct RenderOptions {
     bool alphabetical_order;
     bool directed_graph;
     bool graph_path_editing;
+    bool graph_file_dirty;
+    bool loaded_graph_directed;
     AlgorithmMode algorithm_mode;
     TreeTraversalOrder tree_order;
     LayoutMode layout_mode;

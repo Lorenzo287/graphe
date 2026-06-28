@@ -3,8 +3,7 @@
 Graphe is a C/raylib educational visualizer for graph algorithms. The mature
 mode is an interactive DFS visualizer with discovery and finish times,
 color-coded nodes, and classified directed edges. BFS and tree traversal should
-be treated as separate modes with their own educational state, not as DFS
-variants.
+be treated as separate modes with their own educational state.
 
 This file is for AI agents and maintainers working inside the repository. Keep
 public usage information in `README.md`; keep internal workflow, architecture,
@@ -26,8 +25,8 @@ and verification guidance here.
 - `src/main.c`: raylib application loop, playback controls, and input handling.
 - `src/graph.*`: graph storage, visual state, labels, and sample graph setup.
 - `src/graph_io.*`: `.graphe` file loading.
-- `src/dfs.*`: DFS event trace generation/application, temporary BFS prototype,
-  and first expression-tree traversal prototype.
+- `src/traversal.*`: algorithm trace generation/application for DFS, BFS, and
+  the expression-tree traversal prototype.
 - `src/platform_window.*`: small platform hooks such as Windows title-bar
   styling.
 - `src/layout.*`: graph layout helpers.
@@ -38,7 +37,7 @@ and verification guidance here.
 
 - Main entry point: `src/main.c`.
 - Public user-facing surface: the native raylib window launched by `graphe`.
-- Core DFS implementation: `src/dfs.c` and `src/graph.c`.
+- Core traversal implementation: `src/traversal.c` and `src/graph.c`.
 - Rendering surface: `src/render.c`.
 - Layout logic: `src/layout.c`.
 - Graph import format examples: `graphs/*.graphe`.

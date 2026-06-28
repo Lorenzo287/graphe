@@ -2,9 +2,9 @@
 
 > *γραφή* (*graphê*): writing, drawing, a traced line.
 
-Graphe is a small C/raylib project for visualizing graph algorithms. The mature
-mode is currently DFS, with node colors, discovery and finish times, active
-traversal events, and color-coded edges.
+Graphe is a small C/raylib project for visualizing graph algorithms. The main
+mode is DFS, with node colors, discovery and finish times, active
+traversal events, and color-coded edges. It supports also BFS and tree traversal.
 
 The project is intentionally low-level enough to be educational: it uses a
 native event loop, per-frame drawing, simple geometry, and explicit algorithm
@@ -20,8 +20,8 @@ The initial version contains:
 - keyboard playback controls;
 - draggable nodes;
 - dark and light themes;
-- a runtime mode selector, with BFS and tree traversal still treated as
-  prototypes until they get their own state and rendering;
+- a runtime mode selector for DFS, BFS, and tree traversal;
+- BFS level labels and a depth gradient on visited nodes;
 - directed and undirected graph semantics for DFS, including arrow rendering and
   undirected DFS edge classification;
 - graph import from a small text format;
@@ -134,7 +134,7 @@ version support.
 
 ## Direction
 
-The DFS implementation should remain separate from rendering. Future BFS and
-tree traversal modes should not be forced through DFS concepts: BFS should
-emphasize queue state and depth. Tree traversal now has a first expression-tree
-prototype and should continue moving toward a dedicated tree UI.
+The traversal implementation should remain separate from rendering. DFS, BFS,
+and tree traversal should not be forced through DFS concepts: DFS emphasizes
+timestamps and edge classification, BFS emphasizes depth, and tree traversal
+emphasizes preorder/inorder/postorder output.

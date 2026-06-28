@@ -1,9 +1,9 @@
-#include "dfs.h"
 #include "graph.h"
 #include "graph_io.h"
 #include "layout.h"
 #include "platform_window.h"
 #include "render.h"
+#include "traversal.h"
 
 #include "raylib.h"
 
@@ -291,6 +291,8 @@ static void apply_ui_result(RenderUiResult result, Graph *graph_base,
                                  sizeof(error))) {
             *graph_base = loaded_graph;
             options->directed_graph = graph_base->directed;
+            options->loaded_graph_directed = graph_base->directed;
+            options->graph_file_dirty = false;
             if (options->layout_mode == LAYOUT_MANUAL)
                 options->layout_mode = LAYOUT_TRACE_FOREST;
             base_graph = active_base_graph(options, graph_base, tree_base);
@@ -314,9 +316,9 @@ static void apply_ui_result(RenderUiResult result, Graph *graph_base,
         graph_base->directed != options->directed_graph) {
         if (graph_set_directed(graph_base, options->directed_graph)) {
             result.trace_changed = true;
-            snprintf(options->status_message, sizeof(options->status_message),
-                     "Graph is now %s",
-                     graph_base->directed ? "directed" : "undirected");
+            options->graph_file_dirty =
+                graph_base->directed != options->loaded_graph_directed;
+            options->status_message[0] = '\0';
         } else {
             options->directed_graph = graph_base->directed;
             snprintf(options->status_message, sizeof(options->status_message),
@@ -365,6 +367,8 @@ int main(void) {
         .alphabetical_order = true,
         .directed_graph = true,
         .graph_path_editing = false,
+        .graph_file_dirty = false,
+        .loaded_graph_directed = true,
         .algorithm_mode = ALGORITHM_DFS,
         .tree_order = TREE_ORDER_INORDER,
         .layout_mode = LAYOUT_TRACE_FOREST,

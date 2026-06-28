@@ -42,7 +42,6 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(raygui)
 
 add_executable(graphe
-    src/dfs.c
     src/graph.c
     src/graph_io.c
     src/layout.c
@@ -50,6 +49,7 @@ add_executable(graphe
     src/platform_window.c
     src/raygui_impl.c
     src/render.c
+    src/traversal.c
 )
 
 target_include_directories(graphe PRIVATE src ${raygui_SOURCE_DIR}/src)

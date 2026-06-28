@@ -1,10 +1,11 @@
-#include "dfs.h"
+#include "traversal.h"
 
 #include <string.h>
 
 typedef struct TraversalState {
     NodeColor colors[GRAPHE_MAX_NODES];
     int discover_times[GRAPHE_MAX_NODES];
+    int levels[GRAPHE_MAX_NODES];
     int parent_edges[GRAPHE_MAX_NODES];
     int edge_classified[GRAPHE_MAX_EDGES];
     int time;
@@ -15,8 +16,6 @@ static const TraversalOptions default_options = {
     .alphabetical = 1,
     .tree_order = TREE_ORDER_INORDER,
 };
-
-static const DfsOptions default_dfs_options = {.alphabetical = 1};
 
 static void push_event(Trace *trace, TraceEvent event) {
     if (trace->count >= GRAPHE_MAX_EVENTS) return;
@@ -54,6 +53,13 @@ static TraceEvent make_edge_event(TraceEventType type, int edge, int from, int t
     return event;
 }
 
+static TraceEvent make_edge_event_with_time(TraceEventType type, int edge, int from,
+                                            int to, EdgeType edge_type, int time) {
+    TraceEvent event = make_edge_event(type, edge, from, to, edge_type);
+    event.time = time;
+    return event;
+}
+
 static void traversal_state_init(const Graph *graph, TraversalState *state) {
     memset(state, 0, sizeof(*state));
     state->time = 0;
@@ -61,6 +67,7 @@ static void traversal_state_init(const Graph *graph, TraversalState *state) {
     for (size_t i = 0; i < graph->node_count; i++) {
         state->colors[i] = NODE_WHITE;
         state->discover_times[i] = -1;
+        state->levels[i] = -1;
         state->parent_edges[i] = -1;
     }
 
@@ -107,6 +114,13 @@ static void discover_node(TraversalState *state, Trace *trace, int node) {
     state->time++;
     state->discover_times[node] = state->time;
     push_event(trace, make_node_event(TRACE_EVENT_DISCOVER_NODE, node, state->time));
+}
+
+static void discover_node_at_level(TraversalState *state, Trace *trace, int node,
+                                   int level) {
+    state->colors[node] = NODE_GRAY;
+    state->levels[node] = level;
+    push_event(trace, make_node_event(TRACE_EVENT_DISCOVER_NODE, node, level));
 }
 
 static void finish_node(TraversalState *state, Trace *trace, int node) {
@@ -199,7 +213,7 @@ static void build_bfs_trace(const Graph *graph, const TraversalOptions *options,
 
         int head = 0;
         int tail = 0;
-        discover_node(&state, trace, root);
+        discover_node_at_level(&state, trace, root, 0);
         queue[tail] = root;
         tail++;
 
@@ -221,19 +235,21 @@ static void build_bfs_trace(const Graph *graph, const TraversalOptions *options,
                                            neighbor, EDGE_UNCLASSIFIED));
 
                 if (state.colors[neighbor] == NODE_WHITE) {
+                    int neighbor_level = state.levels[node] + 1;
                     state.parent_edges[neighbor] = edge_id;
                     state.edge_classified[edge_id] = 1;
-                    push_event(trace,
-                               make_edge_event(TRACE_EVENT_CLASSIFY_EDGE, edge_id,
-                                               node, neighbor, EDGE_TREE));
-                    discover_node(&state, trace, neighbor);
+                    push_event(trace, make_edge_event_with_time(
+                                          TRACE_EVENT_CLASSIFY_EDGE, edge_id, node,
+                                          neighbor, EDGE_TREE, neighbor_level));
+                    discover_node_at_level(&state, trace, neighbor, neighbor_level);
                     queue[tail] = neighbor;
                     tail++;
                 } else {
                     if (!graph->directed) continue;
                     push_event(trace,
-                               make_edge_event(TRACE_EVENT_CLASSIFY_EDGE, edge_id,
-                                               node, neighbor, EDGE_CROSS));
+                               make_edge_event_with_time(
+                                   TRACE_EVENT_CLASSIFY_EDGE, edge_id, node,
+                                   neighbor, EDGE_CROSS, state.levels[neighbor]));
                 }
             }
 
@@ -343,6 +359,7 @@ void traversal_trace_apply_prefix(const Graph *base, const Trace *trace,
         case TRACE_EVENT_DISCOVER_NODE:
             out->nodes[event->node].color = NODE_GRAY;
             out->nodes[event->node].discover_time = event->time;
+            out->nodes[event->node].level = event->time;
             break;
         case TRACE_EVENT_EXAMINE_EDGE:
             break;
@@ -357,26 +374,4 @@ void traversal_trace_apply_prefix(const Graph *base, const Trace *trace,
             break;
         }
     }
-}
-
-void dfs_trace_build(const Graph *graph, Trace *trace) {
-    dfs_trace_build_with_options(graph, &default_dfs_options, trace);
-}
-
-void dfs_trace_build_with_options(const Graph *graph, const DfsOptions *options,
-                                  Trace *trace) {
-    if (options == NULL) options = &default_dfs_options;
-
-    TraversalOptions traversal_options = {
-        .algorithm = ALGORITHM_DFS,
-        .alphabetical = options->alphabetical,
-        .tree_order = TREE_ORDER_INORDER,
-    };
-
-    traversal_trace_build(graph, &traversal_options, trace);
-}
-
-void dfs_trace_apply_prefix(const Graph *base, const Trace *trace,
-                            size_t event_count, Graph *out) {
-    traversal_trace_apply_prefix(base, trace, event_count, out);
 }

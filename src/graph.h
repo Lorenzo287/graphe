@@ -43,6 +43,7 @@ typedef struct Node {
     float y;
     int discover_time;
     int finish_time;
+    int level;
     NodeColor color;
 } Node;
 
