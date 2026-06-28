@@ -55,6 +55,15 @@ expression-tree prototype and should continue toward a dedicated tree UI.
 - Renamed the shared algorithm trace module from `dfs.*` to `traversal.*`.
 - Changed BFS presentation to show node levels and a depth gradient instead of
   presenting DFS-style edge classifications.
+- Replaced fixed graph, trace, traversal-state, and layout scratch limits with
+  dynamic storage.
+- Added tree import syntax to `.graphe` files, with stable tree node IDs and
+  free-form displayed values.
+- Added focused C tests for alphabetical adjacency, directed/undirected graph
+  views, undirected BFS edge classification, tree loading, and showcase graph
+  loading.
+- Cached the graph word-pattern background in a render texture so it is rebuilt
+  only when the graph canvas size, theme, or UI scale changes.
 
 ## Next Steps
 
@@ -63,8 +72,6 @@ expression-tree prototype and should continue toward a dedicated tree UI.
   - BFS: queue/frontier state and clearer BFS tree emphasis.
   - Tree traversal: continue replacing graph-specific UI with tree-specific
     controls and expression output.
-- Replace fixed graph/event limits with dynamic storage before adding loading or
-  editing.
 - Consider an in-app graph editor after file loading and dynamic graph storage
   feel solid.
 - Improve edge rendering with curved edges, reciprocal-edge handling, and

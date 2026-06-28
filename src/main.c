@@ -182,13 +182,13 @@ static void apply_layout(Graph *graph, const Trace *trace,
     }
 }
 
-static Graph *active_base_graph(RenderOptions *options, Graph *graph_base,
+static Graph *active_base_graph(const RenderOptions *options, Graph *graph_view,
                                 Graph *tree_base) {
     if (options->algorithm_mode == ALGORITHM_TREE) return tree_base;
-    return graph_base;
+    return graph_view;
 }
 
-static void rebuild_trace(Graph *base_graph, Trace *trace,
+static void rebuild_trace(const Graph *base_graph, Trace *trace,
                           const RenderOptions *options, size_t *step) {
     TraversalOptions traversal_options = {
         .algorithm = options->algorithm_mode,
@@ -276,34 +276,63 @@ static void zoom_camera_at_mouse(Camera2D *camera, Vector2 mouse, float wheel) {
     camera->target.y += before.y - after.y;
 }
 
-static void apply_ui_result(RenderUiResult result, Graph *graph_base,
-                            Graph *tree_base, Trace *trace, RenderOptions *options,
-                            size_t *step, Camera2D *camera, bool *playing) {
-    Graph *base_graph = active_base_graph(options, graph_base, tree_base);
-
+static void apply_ui_result(RenderUiResult result, Graph *graph_source,
+                            Graph *graph_view, Graph *tree_base, Trace *trace,
+                            RenderOptions *options, size_t *step, Camera2D *camera,
+                            bool *playing) {
     if (result.graph_load_requested) {
         Graph loaded_graph;
+        graph_init(&loaded_graph);
+        GraphFileKind loaded_kind = GRAPH_FILE_GRAPH;
         char error[GRAPHE_STATUS_MESSAGE_MAX];
 
         options->graph_path_editing = false;
 
         if (graph_load_from_file(options->graph_path, &loaded_graph, error,
-                                 sizeof(error))) {
-            *graph_base = loaded_graph;
-            options->directed_graph = graph_base->directed;
-            options->loaded_graph_directed = graph_base->directed;
+                                 sizeof(error), &loaded_kind)) {
+            if (loaded_kind == GRAPH_FILE_TREE) {
+                graph_free(tree_base);
+                *tree_base = loaded_graph;
+                graph_init(&loaded_graph);
+                options->algorithm_mode = ALGORITHM_TREE;
+            } else {
+                graph_free(graph_source);
+                *graph_source = loaded_graph;
+                graph_init(&loaded_graph);
+                if (options->algorithm_mode == ALGORITHM_TREE)
+                    options->algorithm_mode = ALGORITHM_DFS;
+                options->directed_graph = graph_source->directed;
+                options->loaded_graph_directed = graph_source->directed;
+
+                if (!graph_build_view(graph_source, options->directed_graph,
+                                      graph_view)) {
+                    snprintf(options->status_message,
+                             sizeof(options->status_message),
+                             "Could not build graph view");
+                    return;
+                }
+            }
+
             options->graph_file_dirty = false;
             if (options->layout_mode == LAYOUT_MANUAL)
                 options->layout_mode = LAYOUT_TRACE_FOREST;
-            base_graph = active_base_graph(options, graph_base, tree_base);
+
+            Graph *base_graph = active_base_graph(options, graph_view, tree_base);
             *step = 0;
             rebuild_trace(base_graph, trace, options, step);
             apply_layout(base_graph, trace, options);
+            if (options->algorithm_mode != ALGORITHM_TREE)
+                graph_copy_node_positions(graph_source, graph_view);
             reset_graph_camera(camera, base_graph, options);
             *playing = false;
-            snprintf(options->status_message, sizeof(options->status_message),
-                     "Loaded %d nodes, %d edges", (int)graph_base->node_count,
-                     (int)visible_edge_count(graph_base));
+            if (loaded_kind == GRAPH_FILE_TREE) {
+                snprintf(options->status_message, sizeof(options->status_message),
+                         "Loaded tree: %d nodes", (int)tree_base->node_count);
+            } else {
+                snprintf(options->status_message, sizeof(options->status_message),
+                         "Loaded %d nodes, %d edges", (int)graph_source->node_count,
+                         (int)visible_edge_count(graph_view));
+            }
         } else {
             snprintf(options->status_message, sizeof(options->status_message),
                      "Load failed: %.120s", error);
@@ -313,20 +342,21 @@ static void apply_ui_result(RenderUiResult result, Graph *graph_base,
     }
 
     if (options->algorithm_mode != ALGORITHM_TREE &&
-        graph_base->directed != options->directed_graph) {
-        if (graph_set_directed(graph_base, options->directed_graph)) {
+        graph_view->directed != options->directed_graph) {
+        graph_copy_node_positions(graph_source, graph_view);
+        if (graph_build_view(graph_source, options->directed_graph, graph_view)) {
             result.trace_changed = true;
             options->graph_file_dirty =
-                graph_base->directed != options->loaded_graph_directed;
+                options->directed_graph != options->loaded_graph_directed;
             options->status_message[0] = '\0';
         } else {
-            options->directed_graph = graph_base->directed;
+            options->directed_graph = graph_view->directed;
             snprintf(options->status_message, sizeof(options->status_message),
                      "Could not change graph direction");
         }
     }
 
-    base_graph = active_base_graph(options, graph_base, tree_base);
+    Graph *base_graph = active_base_graph(options, graph_view, tree_base);
 
     if (result.trace_changed) {
         rebuild_trace(base_graph, trace, options, step);
@@ -338,12 +368,16 @@ static void apply_ui_result(RenderUiResult result, Graph *graph_base,
         }
         reset_graph_camera(camera, base_graph, options);
         *playing = false;
+        if (options->algorithm_mode != ALGORITHM_TREE)
+            graph_copy_node_positions(graph_source, graph_view);
     }
 
     if (result.layout_changed) {
         apply_layout(base_graph, trace, options);
         reset_graph_camera(camera, base_graph, options);
         *playing = false;
+        if (options->algorithm_mode != ALGORITHM_TREE)
+            graph_copy_node_positions(graph_source, graph_view);
     }
 }
 
@@ -381,18 +415,29 @@ int main(void) {
 
     Graph graph_base;
     graph_build_sample(&graph_base);
+    Graph graph_view;
+    graph_init(&graph_view);
+    if (!graph_build_view(&graph_base, options.directed_graph, &graph_view)) {
+        graph_free(&graph_base);
+        render_resources_unload(&render_resources);
+        CloseWindow();
+        return 1;
+    }
     Graph tree_base;
     graph_build_expression_tree(&tree_base);
 
     Trace trace;
+    traversal_trace_init(&trace);
     size_t step = 0;
-    Graph *base_graph = active_base_graph(&options, &graph_base, &tree_base);
+    Graph *base_graph = active_base_graph(&options, &graph_view, &tree_base);
     rebuild_trace(base_graph, &trace, &options, &step);
     apply_layout(base_graph, &trace, &options);
+    graph_copy_node_positions(&graph_base, &graph_view);
 
     Camera2D graph_camera = make_graph_camera();
     reset_graph_camera(&graph_camera, base_graph, &options);
     Graph scene_graph;
+    graph_init(&scene_graph);
     bool playing = false;
     float playback_time = 0.0f;
     int dragging_node = -1;
@@ -411,10 +456,8 @@ int main(void) {
         bool shortcuts_enabled = !options.graph_path_editing;
         RenderUiResult ui_result = render_update_options(&options);
 
-        base_graph = active_base_graph(&options, &graph_base, &tree_base);
-
-        apply_ui_result(ui_result, &graph_base, &tree_base, &trace, &options, &step,
-                        &graph_camera, &playing);
+        apply_ui_result(ui_result, &graph_base, &graph_view, &tree_base, &trace,
+                        &options, &step, &graph_camera, &playing);
         if (native_style_dark_mode != options.dark_mode) {
             platform_window_apply_style(options.dark_mode);
             native_style_dark_mode = options.dark_mode;
@@ -434,7 +477,7 @@ int main(void) {
                     adjust_ui_scale(&options, wheel * 0.06f) || scale_changed;
 
             if (scale_changed) {
-                base_graph = active_base_graph(&options, &graph_base, &tree_base);
+                base_graph = active_base_graph(&options, &graph_view, &tree_base);
                 refresh_layout_after_window_change(base_graph, &trace, &options,
                                                    &graph_camera);
             }
@@ -447,7 +490,7 @@ int main(void) {
              current_window_height != window_height)) {
             window_width = current_window_width;
             window_height = current_window_height;
-            base_graph = active_base_graph(&options, &graph_base, &tree_base);
+            base_graph = active_base_graph(&options, &graph_view, &tree_base);
             refresh_layout_after_window_change(base_graph, &trace, &options,
                                                &graph_camera);
         }
@@ -472,7 +515,7 @@ int main(void) {
             playing = false;
         }
         if (shortcuts_enabled && IsKeyPressed(KEY_R)) {
-            base_graph = active_base_graph(&options, &graph_base, &tree_base);
+            base_graph = active_base_graph(&options, &graph_view, &tree_base);
             apply_layout(base_graph, &trace, &options);
             reset_graph_camera(&graph_camera, base_graph, &options);
             playing = false;
@@ -499,7 +542,7 @@ int main(void) {
         if (!ui_result.consumed_click && !options.settings_open &&
             render_point_in_graph_canvas(mouse, &options) &&
             IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
-            base_graph = active_base_graph(&options, &graph_base, &tree_base);
+            base_graph = active_base_graph(&options, &graph_view, &tree_base);
             dragging_node = find_node_at(base_graph, mouse_world);
             if (dragging_node >= 0) {
                 options.layout_mode = LAYOUT_MANUAL;
@@ -513,7 +556,7 @@ int main(void) {
         if (dragging_node >= 0) {
             if (IsMouseButtonDown(MOUSE_LEFT_BUTTON)) {
                 mouse_world = GetScreenToWorld2D(mouse, graph_camera);
-                base_graph = active_base_graph(&options, &graph_base, &tree_base);
+                base_graph = active_base_graph(&options, &graph_view, &tree_base);
                 base_graph->nodes[dragging_node].x = mouse_world.x + drag_offset.x;
                 base_graph->nodes[dragging_node].y = mouse_world.y + drag_offset.y;
             } else {
@@ -531,7 +574,10 @@ int main(void) {
             }
         }
 
-        base_graph = active_base_graph(&options, &graph_base, &tree_base);
+        if (options.algorithm_mode != ALGORITHM_TREE)
+            graph_copy_node_positions(&graph_base, &graph_view);
+
+        base_graph = active_base_graph(&options, &graph_view, &tree_base);
         traversal_trace_apply_prefix(base_graph, &trace, step, &scene_graph);
 
         BeginDrawing();
@@ -540,14 +586,19 @@ int main(void) {
             &scene_graph, &trace, step, &render_resources, &options, &graph_camera);
         EndDrawing();
 
-        apply_ui_result(draw_result, &graph_base, &tree_base, &trace, &options,
-                        &step, &graph_camera, &playing);
+        apply_ui_result(draw_result, &graph_base, &graph_view, &tree_base, &trace,
+                        &options, &step, &graph_camera, &playing);
         if (native_style_dark_mode != options.dark_mode) {
             platform_window_apply_style(options.dark_mode);
             native_style_dark_mode = options.dark_mode;
         }
     }
 
+    traversal_trace_free(&trace);
+    graph_free(&scene_graph);
+    graph_free(&tree_base);
+    graph_free(&graph_view);
+    graph_free(&graph_base);
     render_resources_unload(&render_resources);
     CloseWindow();
     return 0;

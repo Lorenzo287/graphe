@@ -64,20 +64,23 @@ static Theme dark_theme(void) {
     return (Theme){
         .background = {17, 24, 39, 255},
         .panel = {31, 41, 55, 255},
-        .panel_border = {75, 85, 99, 255},
-        .text = {243, 244, 246, 255},
-        .muted_text = {176, 183, 195, 255},
-        .node_white = {243, 244, 246, 255},
-        .node_gray = {245, 158, 11, 255},
-        .node_black = {55, 65, 81, 255},
-        .node_outline = {209, 213, 219, 255},
-        .active = {251, 146, 60, 255},
+        .panel_border = {105, 115, 129, 255},
+        .text = {249, 250, 252, 255},
+        .muted_text = {182, 189, 201, 255},
+        .node_white = {233, 234, 236, 255},
+        .node_gray = {225, 118, 21, 255},
+        // .node_gray = {192, 185, 74, 255},
+        .node_black = {12, 22, 35, 255},
+        .node_outline = {107, 114, 128, 255},
+        .active = {225, 118, 21, 255},
+        // .active = {192, 185, 74, 255},
         .edge_unclassified = {107, 114, 128, 255},
+        // .edge_tree = {19, 133, 63, 255},
         .edge_tree = {34, 197, 94, 255},
-        .edge_back = {248, 113, 113, 255},
+        .edge_back = {248, 93, 93, 255},
         .edge_forward = {96, 165, 250, 255},
         .edge_cross = {192, 132, 252, 255},
-        .button = {55, 65, 81, 255},
+        .button = {85, 85, 91, 255},
         .button_hover = {75, 85, 99, 255},
         .button_active = {30, 64, 175, 255},
         .overlay = {3, 7, 18, 190},
@@ -345,6 +348,11 @@ void render_resources_load(RenderResources *resources) {
 
     resources->font = GetFontDefault();
     resources->custom_font_loaded = false;
+    resources->graph_background_loaded = false;
+    resources->graph_background_width = 0;
+    resources->graph_background_height = 0;
+    resources->graph_background_dark_mode = false;
+    resources->graph_background_ui_scale = 0.0f;
 
     for (size_t i = 0; i < sizeof(font_paths) / sizeof(font_paths[0]); i++) {
         if (!FileExists(font_paths[i])) continue;
@@ -360,7 +368,17 @@ void render_resources_load(RenderResources *resources) {
     }
 }
 
+static void unload_graph_background(RenderResources *resources) {
+    if (resources->graph_background_loaded)
+        UnloadRenderTexture(resources->graph_background);
+
+    resources->graph_background_loaded = false;
+    resources->graph_background_width = 0;
+    resources->graph_background_height = 0;
+}
+
 void render_resources_unload(RenderResources *resources) {
+    unload_graph_background(resources);
     if (resources->custom_font_loaded) UnloadFont(resources->font);
     resources->custom_font_loaded = false;
 }
@@ -432,8 +450,7 @@ static void draw_edge_glow(EdgeGeometry geometry, Vector2 end, Color color) {
 }
 
 static Vector2 edge_glow_arrow_endpoint(Vector2 tip, Vector2 direction) {
-    return vector_subtract(tip,
-                           vector_scale(direction, GRAPHE_ARROW_LENGTH * 1.0));
+    return vector_subtract(tip, vector_scale(direction, GRAPHE_ARROW_LENGTH * 1.0));
 }
 
 static float clamp_float(float value, float min, float max) {
@@ -633,7 +650,7 @@ static void draw_node(const RenderResources *resources, const Node *node, int ac
 
     if (active) draw_node_glow(center, theme->active);
     DrawCircleV(center, GRAPHE_NODE_RADIUS, fill);
-    DrawRing(center, GRAPHE_NODE_RADIUS - 2.5f, GRAPHE_NODE_RADIUS, 0, 360, 64,
+    DrawRing(center, GRAPHE_NODE_RADIUS - 1.8f, GRAPHE_NODE_RADIUS, 0, 360, 64,
              outline);
 
     float label_y = show_times || show_level ? node->y - label_size.y + 3.0f
@@ -710,19 +727,8 @@ static void describe_event(const Graph *graph, const Trace *trace,
     if (options->algorithm_mode == ALGORITHM_TREE) {
         char output[96];
         build_tree_output(graph, trace, active_index, output, sizeof(output));
-
-        if (event->type == TRACE_EVENT_DISCOVER_NODE) {
-            // snprintf(buffer, buffer_size, "visit %s   %s: %s",
-            snprintf(buffer, buffer_size, "%s: %s",
-                     // graph->nodes[event->node].label,
-                     tree_traversal_order_name(options->tree_order), output);
-        } else {
-            // snprintf(buffer, buffer_size, "traverse %s -> %s   %s: %s",
-            snprintf(
-                buffer, buffer_size, "%s: %s",
-                // graph->nodes[event->from].label, graph->nodes[event->to].label,
-                tree_traversal_order_name(options->tree_order), output);
-        }
+        snprintf(buffer, buffer_size, "%s: %s",
+                 tree_traversal_order_name(options->tree_order), output);
         return;
     }
 
@@ -852,7 +858,7 @@ static bool rounded_button(const RenderResources *resources,
     Color fill = hovered ? lighten_color(base, 0.10f) : base;
     Color border =
         active ? lighten_color(theme->button_active, 0.18f) : theme->panel_border;
-    float text_size = ui_size(options, 16.0f);
+    float text_size = ui_size(options, 17.0f);
     Vector2 text_size_px = measure_text(resources, text, text_size);
 
     DrawRectangleRounded(bounds, 0.22f, 8, fill);
@@ -881,7 +887,7 @@ static bool rounded_choice_button(const RenderResources *resources,
     draw_text(resources, text,
               (Vector2){bounds.x + ui_size(options, 16.0f),
                         bounds.y + ui_size(options, 8.0f)},
-              ui_size(options, 16.0f), theme->text);
+              ui_size(options, 17.0f), theme->text);
 
     return hovered && IsMouseButtonReleased(MOUSE_LEFT_BUTTON);
 }
@@ -937,6 +943,11 @@ static void merge_ui_result(RenderUiResult *result, RenderUiResult update) {
         result->graph_load_requested || update.graph_load_requested;
 }
 
+static void ensure_graph_word_background(RenderResources *resources,
+                                         const RenderOptions *options,
+                                         const Theme *theme, int width, int height);
+static void draw_graph_word_background(const RenderResources *resources);
+
 static void draw_settings_section(const RenderResources *resources,
                                   const RenderOptions *options, const Theme *theme,
                                   Rectangle bounds, const char *title) {
@@ -960,7 +971,7 @@ static Rectangle settings_section_row(const RenderOptions *options,
         section.width - pad * 2.0f, row_height};
 }
 
-static RenderUiResult draw_settings(const RenderResources *resources,
+static RenderUiResult draw_settings(RenderResources *resources,
                                     RenderOptions *options, const Theme *theme) {
     RenderUiResult result = {0};
     float screen_width = (float)GetScreenWidth();
@@ -986,22 +997,17 @@ static RenderUiResult draw_settings(const RenderResources *resources,
                               ui_size(options, 29.0f), ui_size(options, 104.0f),
                               ui_size(options, 38.0f)};
 
-    DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), theme->background);
+    ensure_graph_word_background(resources, options, theme, GetScreenWidth(),
+                                 GetScreenHeight());
+    draw_graph_word_background(resources);
 
     draw_text(resources, "Settings", (Vector2){margin, ui_size(options, 33.0f)},
               ui_size(options, 30.0f), theme->text);
-    // draw_text(resources,
-    //           "Configure the visualizer without the graph competing for space",
-    //           (Vector2){margin, ui_size(options, 61.0f)}, ui_size(options, 16.0f),
-    //           theme->muted_text);
 
     if (rounded_button(resources, options, theme, close_button, "Close", false)) {
         options->settings_open = false;
         result.consumed_click = true;
     }
-
-    // DrawLine(0, (int)ui_size(options, 84.0f), GetScreenWidth(),
-    //          (int)ui_size(options, 84.0f), theme->panel_border);
 
     draw_settings_section(resources, options, theme, algorithms, "Algorithm");
     if (rounded_choice_button(resources, options, theme,
@@ -1145,11 +1151,12 @@ static RenderUiResult draw_settings(const RenderResources *resources,
     return result;
 }
 
-static void draw_graph_word_background(const RenderResources *resources,
-                                       const RenderOptions *options,
-                                       const Theme *theme) {
-    float graph_width = render_graph_area_width(options);
-    float graph_height = render_graph_area_height();
+static void rebuild_graph_word_background(RenderResources *resources,
+                                          const RenderOptions *options,
+                                          const Theme *theme, int width,
+                                          int height) {
+    float graph_width = (float)width;
+    float graph_height = (float)height;
     const char *words[] = {"graphe", "graph", "dfs", "tree", "edge", "node"};
     const int word_count = 6;
     const float angle = -18.0f;
@@ -1161,13 +1168,24 @@ static void draw_graph_word_background(const RenderResources *resources,
     int cols = (int)((graph_width + graph_height) / step_x) + 5;
     int rows = (int)((graph_width + graph_height) / step_y) + 5;
     Color colors[] = {
-        with_alpha(lighten_color(theme->background, 0.14f),
-                   options->dark_mode ? 38 : 34),
-        with_alpha(lighten_color(theme->panel, 0.08f), options->dark_mode ? 34 : 30),
-        with_alpha(theme->edge_unclassified, options->dark_mode ? 28 : 24),
+        with_alpha(lighten_color(theme->background, 0.20f),
+                   options->dark_mode ? 56 : 50),
+        with_alpha(lighten_color(theme->panel, 0.14f), options->dark_mode ? 52 : 46),
+        with_alpha(theme->edge_unclassified, options->dark_mode ? 44 : 38),
     };
 
-    BeginScissorMode(0, 0, (int)graph_width, (int)graph_height);
+    unload_graph_background(resources);
+    resources->graph_background = LoadRenderTexture(width, height);
+    if (resources->graph_background.texture.id == 0) return;
+
+    resources->graph_background_loaded = true;
+    resources->graph_background_width = width;
+    resources->graph_background_height = height;
+    resources->graph_background_dark_mode = options->dark_mode;
+    resources->graph_background_ui_scale = ui_scale_value(options);
+
+    BeginTextureMode(resources->graph_background);
+    ClearBackground(theme->background);
 
     for (int row = 0; row < rows; row++) {
         for (int col = 0; col < cols; col++) {
@@ -1185,12 +1203,44 @@ static void draw_graph_word_background(const RenderResources *resources,
             float font_size = ui_size(options, 15.0f + (float)((row + col) % 5));
 
             DrawTextPro(resources->font, words[word_index], (Vector2){x, y},
-                        (Vector2){0.0f, 0.0f}, angle, font_size, font_size * 0.04f,
+                        (Vector2){0.0f, 0.0f}, angle, font_size, font_size * 0.20f,
                         colors[color_index]);
         }
     }
 
-    EndScissorMode();
+    EndTextureMode();
+}
+
+static void ensure_graph_word_background(RenderResources *resources,
+                                         const RenderOptions *options,
+                                         const Theme *theme, int width, int height) {
+    if (width <= 0 || height <= 0) {
+        unload_graph_background(resources);
+        return;
+    }
+
+    bool background_stale =
+        !resources->graph_background_loaded ||
+        resources->graph_background_width != width ||
+        resources->graph_background_height != height ||
+        resources->graph_background_dark_mode != options->dark_mode ||
+        resources->graph_background_ui_scale != ui_scale_value(options);
+
+    if (background_stale)
+        rebuild_graph_word_background(resources, options, theme, width, height);
+}
+
+static void draw_graph_word_background(const RenderResources *resources) {
+    if (!resources->graph_background_loaded) return;
+
+    Rectangle source = {
+        0.0f,
+        0.0f,
+        (float)resources->graph_background_width,
+        -(float)resources->graph_background_height,
+    };
+    DrawTextureRec(resources->graph_background.texture, source,
+                   (Vector2){0.0f, 0.0f}, WHITE);
 }
 
 static void draw_event_banner(const Graph *graph, const Trace *trace,
@@ -1218,7 +1268,6 @@ static void draw_event_banner(const Graph *graph, const Trace *trace,
         width,
         height,
     };
-    // Color fill = with_alpha(theme->panel, options->dark_mode ? 224 : 235);
     Color fill = with_alpha(theme->panel, 255);
 
     DrawRectangleRounded(box, 0.18f, 8, fill);
@@ -1362,21 +1411,16 @@ static RenderUiResult draw_sidebar(const Graph *graph, const Trace *trace,
     for (int i = 0; i < 4; i++) {
         float item_y = y + 1.0f + line * (16.0f + (float)i * 0.8f);
         Color color = edge_color(theme, edge_types[i]);
-        // DrawCircleV(
-        //     (Vector2){x + ui_size(options, 8.0f), item_y +
-        //     ui_size(options, 8.0f)}, ui_size(options, 6.0f), color);
-        draw_text(resources, labels[i],
-                  // (Vector2){x + ui_size(options, 24.0f), item_y},
-                  (Vector2){x, item_y}, ui_size(options, 19.0f), color);
+        draw_text(resources, labels[i], (Vector2){x, item_y},
+                  ui_size(options, 19.0f), color);
     }
 
     return result;
 }
 
 RenderUiResult render_graph(const Graph *graph, const Trace *trace,
-                            size_t applied_event_count,
-                            const RenderResources *resources, RenderOptions *options,
-                            const Camera2D *camera) {
+                            size_t applied_event_count, RenderResources *resources,
+                            RenderOptions *options, const Camera2D *camera) {
     RenderUiResult result = {0};
     Theme theme = theme_for_options(options);
     size_t active_index =
@@ -1391,7 +1435,10 @@ RenderUiResult render_graph(const Graph *graph, const Trace *trace,
         return result;
     }
 
-    draw_graph_word_background(resources, options, &theme);
+    ensure_graph_word_background(resources, options, &theme,
+                                 (int)ceilf(render_graph_area_width(options)),
+                                 (int)ceilf(render_graph_area_height()));
+    draw_graph_word_background(resources);
 
     BeginScissorMode(0, 0, (int)render_graph_area_width(options),
                      (int)render_graph_area_height());
@@ -1402,21 +1449,16 @@ RenderUiResult render_graph(const Graph *graph, const Trace *trace,
         draw_edge_body(graph, i, is_active_edge(graph, trace, active_index, i),
                        is_active_examine_edge(graph, trace, active_index, i), &theme,
                        options);
+        if (graph->directed)
+            draw_edge_arrow(graph, i,
+                            is_active_examine_edge(graph, trace, active_index, i),
+                            &theme, options);
     }
 
     for (size_t i = 0; i < graph->node_count; i++)
         draw_node(resources, &graph->nodes[i],
                   is_active_node(trace, active_index, i), &theme, options,
                   bfs_max_level);
-
-    if (graph->directed) {
-        for (size_t i = 0; i < graph->edge_count; i++) {
-            if (!graph_edge_is_visible(graph, (int)i)) continue;
-            draw_edge_arrow(graph, i,
-                            is_active_examine_edge(graph, trace, active_index, i),
-                            &theme, options);
-        }
-    }
 
     EndMode2D();
     EndScissorMode();

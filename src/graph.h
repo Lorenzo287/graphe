@@ -4,10 +4,6 @@
 #include <stddef.h>
 #include <stdbool.h>
 
-#define GRAPHE_MAX_NODES 16
-#define GRAPHE_MAX_EDGES 64
-#define GRAPHE_MAX_EVENTS 256
-
 typedef enum NodeColor { NODE_WHITE, NODE_GRAY, NODE_BLACK } NodeColor;
 
 typedef enum EdgeType {
@@ -38,7 +34,7 @@ typedef enum TraceEventType {
 } TraceEventType;
 
 typedef struct Node {
-    char label[16];
+    char *label;
     float x;
     float y;
     int discover_time;
@@ -59,15 +55,17 @@ typedef struct Edge {
 
 typedef struct Graph {
     bool directed;
-    Node nodes[GRAPHE_MAX_NODES];
-    int next_alpha_node[GRAPHE_MAX_NODES];
+    Node *nodes;
+    int *next_alpha_node;
     int first_alpha_node;
-    int first_out[GRAPHE_MAX_NODES];
-    int last_out[GRAPHE_MAX_NODES];
-    int first_alpha_out[GRAPHE_MAX_NODES];
+    int *first_out;
+    int *last_out;
+    int *first_alpha_out;
     size_t node_count;
-    Edge edges[GRAPHE_MAX_EDGES];
+    size_t node_capacity;
+    Edge *edges;
     size_t edge_count;
+    size_t edge_capacity;
 } Graph;
 
 typedef struct TraceEvent {
@@ -81,15 +79,20 @@ typedef struct TraceEvent {
 } TraceEvent;
 
 typedef struct Trace {
-    TraceEvent events[GRAPHE_MAX_EVENTS];
+    TraceEvent *events;
     size_t count;
+    size_t capacity;
 } Trace;
 
 void graph_init(Graph *graph);
+void graph_free(Graph *graph);
+bool graph_copy(const Graph *source, Graph *out);
 int graph_add_node(Graph *graph, const char *label);
 int graph_add_edge(Graph *graph, int from, int to);
 int graph_find_node(const Graph *graph, const char *label);
-bool graph_set_directed(Graph *graph, bool directed);
+bool graph_build_view(const Graph *source, bool directed, Graph *out);
+void graph_copy_node_positions(Graph *to, const Graph *from);
+bool graph_structure_equals(const Graph *left, const Graph *right);
 bool graph_edge_is_visible(const Graph *graph, int edge_index);
 int graph_edge_neighbor(const Graph *graph, int edge_index, int node);
 int graph_next_adjacent_edge(const Graph *graph, int edge_index, int node,

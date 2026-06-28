@@ -41,6 +41,12 @@ typedef struct RenderOptions {
 typedef struct RenderResources {
     Font font;
     bool custom_font_loaded;
+    RenderTexture2D graph_background;
+    bool graph_background_loaded;
+    int graph_background_width;
+    int graph_background_height;
+    bool graph_background_dark_mode;
+    float graph_background_ui_scale;
 } RenderResources;
 
 typedef struct RenderUiResult {
@@ -55,9 +61,8 @@ void render_resources_unload(RenderResources *resources);
 
 RenderUiResult render_update_options(RenderOptions *options);
 RenderUiResult render_graph(const Graph *graph, const Trace *trace,
-                            size_t applied_event_count,
-                            const RenderResources *resources, RenderOptions *options,
-                            const Camera2D *camera);
+                            size_t applied_event_count, RenderResources *resources,
+                            RenderOptions *options, const Camera2D *camera);
 
 Color render_background_color(const RenderOptions *options);
 float render_sidebar_width(const RenderOptions *options);

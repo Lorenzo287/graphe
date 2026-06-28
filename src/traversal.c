@@ -1,13 +1,14 @@
 #include "traversal.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 typedef struct TraversalState {
-    NodeColor colors[GRAPHE_MAX_NODES];
-    int discover_times[GRAPHE_MAX_NODES];
-    int levels[GRAPHE_MAX_NODES];
-    int parent_edges[GRAPHE_MAX_NODES];
-    int edge_classified[GRAPHE_MAX_EDGES];
+    NodeColor *colors;
+    int *discover_times;
+    int *levels;
+    int *parent_edges;
+    int *edge_classified;
     int time;
 } TraversalState;
 
@@ -17,8 +18,33 @@ static const TraversalOptions default_options = {
     .tree_order = TREE_ORDER_INORDER,
 };
 
+void traversal_trace_init(Trace *trace) {
+    trace->events = NULL;
+    trace->count = 0;
+    trace->capacity = 0;
+}
+
+void traversal_trace_free(Trace *trace) {
+    free(trace->events);
+    traversal_trace_init(trace);
+}
+
+static bool trace_reserve_events(Trace *trace, size_t required) {
+    if (required <= trace->capacity) return true;
+
+    size_t capacity = trace->capacity == 0 ? 64 : trace->capacity;
+    while (capacity < required) capacity *= 2;
+
+    TraceEvent *events = realloc(trace->events, capacity * sizeof(*events));
+    if (events == NULL) return false;
+
+    trace->events = events;
+    trace->capacity = capacity;
+    return true;
+}
+
 static void push_event(Trace *trace, TraceEvent event) {
-    if (trace->count >= GRAPHE_MAX_EVENTS) return;
+    if (!trace_reserve_events(trace, trace->count + 1)) return;
 
     trace->events[trace->count] = event;
     trace->count++;
@@ -60,9 +86,39 @@ static TraceEvent make_edge_event_with_time(TraceEventType type, int edge, int f
     return event;
 }
 
-static void traversal_state_init(const Graph *graph, TraversalState *state) {
+static void traversal_state_free(TraversalState *state) {
+    free(state->colors);
+    free(state->discover_times);
+    free(state->levels);
+    free(state->parent_edges);
+    free(state->edge_classified);
+    memset(state, 0, sizeof(*state));
+}
+
+static bool traversal_state_init(const Graph *graph, TraversalState *state) {
     memset(state, 0, sizeof(*state));
     state->time = 0;
+
+    if (graph->node_count > 0) {
+        state->colors = malloc(graph->node_count * sizeof(*state->colors));
+        state->discover_times =
+            malloc(graph->node_count * sizeof(*state->discover_times));
+        state->levels = malloc(graph->node_count * sizeof(*state->levels));
+        state->parent_edges =
+            malloc(graph->node_count * sizeof(*state->parent_edges));
+        if (state->colors == NULL || state->discover_times == NULL ||
+            state->levels == NULL || state->parent_edges == NULL) {
+            traversal_state_free(state);
+            return false;
+        }
+    }
+
+    size_t edge_slots = graph->edge_count == 0 ? 1 : graph->edge_count;
+    state->edge_classified = calloc(edge_slots, sizeof(*state->edge_classified));
+    if (state->edge_classified == NULL) {
+        traversal_state_free(state);
+        return false;
+    }
 
     for (size_t i = 0; i < graph->node_count; i++) {
         state->colors[i] = NODE_WHITE;
@@ -71,7 +127,7 @@ static void traversal_state_init(const Graph *graph, TraversalState *state) {
         state->parent_edges[i] = -1;
     }
 
-    for (size_t i = 0; i < graph->edge_count; i++) state->edge_classified[i] = 0;
+    return true;
 }
 
 static int first_out_edge(const Graph *graph, int node,
@@ -191,21 +247,30 @@ static void dfs_visit_node(const Graph *graph, int node, int parent_edge,
 static void build_dfs_trace(const Graph *graph, const TraversalOptions *options,
                             Trace *trace) {
     TraversalState state;
-    traversal_state_init(graph, &state);
+    if (!traversal_state_init(graph, &state)) return;
 
     for (int node = first_root_node(graph, options); node != -1;
          node = next_root_node(graph, node, options)) {
         if (state.colors[node] == NODE_WHITE)
             dfs_visit_node(graph, node, -1, options, &state, trace);
     }
+
+    traversal_state_free(&state);
 }
 
 static void build_bfs_trace(const Graph *graph, const TraversalOptions *options,
                             Trace *trace) {
     TraversalState state;
-    int queue[GRAPHE_MAX_NODES];
+    int *queue = NULL;
 
-    traversal_state_init(graph, &state);
+    if (!traversal_state_init(graph, &state)) return;
+    if (graph->node_count > 0) {
+        queue = malloc(graph->node_count * sizeof(*queue));
+        if (queue == NULL) {
+            traversal_state_free(&state);
+            return;
+        }
+    }
 
     for (int root = first_root_node(graph, options); root != -1;
          root = next_root_node(graph, root, options)) {
@@ -242,10 +307,12 @@ static void build_bfs_trace(const Graph *graph, const TraversalOptions *options,
                                           TRACE_EVENT_CLASSIFY_EDGE, edge_id, node,
                                           neighbor, EDGE_TREE, neighbor_level));
                     discover_node_at_level(&state, trace, neighbor, neighbor_level);
-                    queue[tail] = neighbor;
-                    tail++;
+                    if ((size_t)tail < graph->node_count) {
+                        queue[tail] = neighbor;
+                        tail++;
+                    }
                 } else {
-                    if (!graph->directed) continue;
+                    state.edge_classified[edge_id] = 1;
                     push_event(trace,
                                make_edge_event_with_time(
                                    TRACE_EVENT_CLASSIFY_EDGE, edge_id, node,
@@ -256,47 +323,34 @@ static void build_bfs_trace(const Graph *graph, const TraversalOptions *options,
             finish_node(&state, trace, node);
         }
     }
-}
 
-static int collect_tree_child_edges(const Graph *graph, int node, int *child_edges,
-                                    int capacity) {
-    int count = 0;
-
-    for (int edge_id = first_out_edge_in_insertion_order(graph, node); edge_id != -1;
-         edge_id = next_out_edge_in_insertion_order(graph, edge_id, node)) {
-        int neighbor = graph_edge_neighbor(graph, edge_id, node);
-        if (neighbor < 0) continue;
-        if (count >= capacity) break;
-
-        child_edges[count] = edge_id;
-        count++;
-    }
-
-    return count;
+    free(queue);
+    traversal_state_free(&state);
 }
 
 static void tree_visit_node(const Graph *graph, int node,
                             const TraversalOptions *options, TraversalState *state,
                             Trace *trace) {
-    int child_edges[GRAPHE_MAX_NODES];
-    int child_count =
-        collect_tree_child_edges(graph, node, child_edges, GRAPHE_MAX_NODES);
     int visited_node = 0;
+    int child_index = 0;
 
     if (options->tree_order == TREE_ORDER_PREORDER) {
         discover_node(state, trace, node);
         visited_node = 1;
     }
 
-    for (int i = 0; i < child_count; i++) {
-        if (options->tree_order == TREE_ORDER_INORDER && i == 1) {
+    for (int edge_id = first_out_edge_in_insertion_order(graph, node); edge_id != -1;
+         edge_id = next_out_edge_in_insertion_order(graph, edge_id, node)) {
+        int neighbor = graph_edge_neighbor(graph, edge_id, node);
+        if (neighbor < 0) continue;
+
+        if (options->tree_order == TREE_ORDER_INORDER && child_index == 1) {
             discover_node(state, trace, node);
             visited_node = 1;
         }
+        child_index++;
 
-        int edge_id = child_edges[i];
-        int neighbor = graph_edge_neighbor(graph, edge_id, node);
-        if (neighbor < 0 || state->colors[neighbor] != NODE_WHITE) continue;
+        if (state->colors[neighbor] != NODE_WHITE) continue;
 
         push_event(trace, make_edge_event(TRACE_EVENT_EXAMINE_EDGE, edge_id, node,
                                           neighbor, EDGE_UNCLASSIFIED));
@@ -307,7 +361,6 @@ static void tree_visit_node(const Graph *graph, int node,
 
     if (options->tree_order == TREE_ORDER_INORDER && !visited_node) {
         discover_node(state, trace, node);
-        visited_node = 1;
     }
     if (options->tree_order == TREE_ORDER_POSTORDER)
         discover_node(state, trace, node);
@@ -316,13 +369,33 @@ static void tree_visit_node(const Graph *graph, int node,
 static void build_tree_trace(const Graph *graph, const TraversalOptions *options,
                              Trace *trace) {
     TraversalState state;
-    traversal_state_init(graph, &state);
+    if (!traversal_state_init(graph, &state)) return;
 
-    for (int node = first_root_node(graph, options); node != -1;
-         node = next_root_node(graph, node, options)) {
-        if (state.colors[node] == NODE_WHITE)
-            tree_visit_node(graph, node, options, &state, trace);
+    int *has_parent = NULL;
+    if (graph->node_count > 0) {
+        has_parent = calloc(graph->node_count, sizeof(*has_parent));
+        if (has_parent == NULL) {
+            traversal_state_free(&state);
+            return;
+        }
     }
+
+    for (size_t i = 0; i < graph->edge_count; i++) {
+        int child = graph->edges[i].to;
+        if (child >= 0 && (size_t)child < graph->node_count) has_parent[child] = 1;
+    }
+
+    for (size_t node = 0; node < graph->node_count; node++) {
+        if (!has_parent[node] && state.colors[node] == NODE_WHITE)
+            tree_visit_node(graph, (int)node, options, &state, trace);
+    }
+    for (size_t node = 0; node < graph->node_count; node++) {
+        if (state.colors[node] == NODE_WHITE)
+            tree_visit_node(graph, (int)node, options, &state, trace);
+    }
+
+    free(has_parent);
+    traversal_state_free(&state);
 }
 
 void traversal_trace_build(const Graph *graph, const TraversalOptions *options,
@@ -347,7 +420,11 @@ void traversal_trace_build(const Graph *graph, const TraversalOptions *options,
 
 void traversal_trace_apply_prefix(const Graph *base, const Trace *trace,
                                   size_t event_count, Graph *out) {
-    *out = *base;
+    if (!graph_structure_equals(out, base)) {
+        if (!graph_copy(base, out)) return;
+    } else {
+        graph_copy_node_positions(out, base);
+    }
     graph_reset_visual_state(out);
 
     if (event_count > trace->count) event_count = trace->count;

@@ -1,6 +1,7 @@
 #include "layout.h"
 
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 void layout_circle(Graph *graph, float center_x, float center_y, float radius) {
@@ -16,23 +17,79 @@ void layout_circle(Graph *graph, float center_x, float center_y, float radius) {
 }
 
 typedef struct ForestLayoutState {
-    int children[GRAPHE_MAX_NODES][GRAPHE_MAX_NODES];
-    int child_counts[GRAPHE_MAX_NODES];
-    int roots[GRAPHE_MAX_NODES];
+    int *first_child;
+    int *last_child;
+    int *next_sibling;
+    int *child_counts;
+    int *roots;
     int root_count;
-    int parent[GRAPHE_MAX_NODES];
-    int subtree_leaves[GRAPHE_MAX_NODES];
+    int *parent;
+    int *subtree_leaves;
+    size_t node_count;
 } ForestLayoutState;
 
-static void build_forest_from_trace(const Graph *graph, const Trace *trace,
-                                    ForestLayoutState *state) {
+static void forest_layout_state_free(ForestLayoutState *state) {
+    free(state->first_child);
+    free(state->last_child);
+    free(state->next_sibling);
+    free(state->child_counts);
+    free(state->roots);
+    free(state->parent);
+    free(state->subtree_leaves);
     memset(state, 0, sizeof(*state));
+}
 
-    for (size_t i = 0; i < graph->node_count; i++) {
+static bool forest_layout_state_init(ForestLayoutState *state, size_t node_count) {
+    memset(state, 0, sizeof(*state));
+    state->node_count = node_count;
+
+    if (node_count == 0) return true;
+
+    state->first_child = malloc(node_count * sizeof(*state->first_child));
+    state->last_child = malloc(node_count * sizeof(*state->last_child));
+    state->next_sibling = malloc(node_count * sizeof(*state->next_sibling));
+    state->child_counts = calloc(node_count, sizeof(*state->child_counts));
+    state->roots = malloc(node_count * sizeof(*state->roots));
+    state->parent = malloc(node_count * sizeof(*state->parent));
+    state->subtree_leaves = malloc(node_count * sizeof(*state->subtree_leaves));
+
+    if (state->first_child == NULL || state->last_child == NULL ||
+        state->next_sibling == NULL || state->child_counts == NULL ||
+        state->roots == NULL || state->parent == NULL ||
+        state->subtree_leaves == NULL) {
+        forest_layout_state_free(state);
+        return false;
+    }
+
+    for (size_t i = 0; i < node_count; i++) {
+        state->first_child[i] = -1;
+        state->last_child[i] = -1;
+        state->next_sibling[i] = -1;
         state->parent[i] = -1;
         state->subtree_leaves[i] = 1;
     }
 
+    return true;
+}
+
+static void append_child(ForestLayoutState *state, int parent, int child) {
+    if (state->parent[child] != -1) return;
+
+    state->parent[child] = parent;
+    state->next_sibling[child] = -1;
+
+    if (state->first_child[parent] == -1) {
+        state->first_child[parent] = child;
+    } else {
+        state->next_sibling[state->last_child[parent]] = child;
+    }
+
+    state->last_child[parent] = child;
+    state->child_counts[parent]++;
+}
+
+static void build_forest_from_trace(const Graph *graph, const Trace *trace,
+                                    ForestLayoutState *state) {
     for (size_t i = 0; i < trace->count; i++) {
         const TraceEvent *event = &trace->events[i];
 
@@ -40,18 +97,22 @@ static void build_forest_from_trace(const Graph *graph, const Trace *trace,
             event->edge_type != EDGE_TREE) {
             continue;
         }
+        if (event->from < 0 || event->to < 0) continue;
+        if ((size_t)event->from >= graph->node_count ||
+            (size_t)event->to >= graph->node_count) {
+            continue;
+        }
 
-        int child_count = state->child_counts[event->from];
-        state->children[event->from][child_count] = event->to;
-        state->child_counts[event->from]++;
-        state->parent[event->to] = event->from;
+        append_child(state, event->from, event->to);
     }
 
     for (size_t i = 0; i < trace->count; i++) {
         const TraceEvent *event = &trace->events[i];
 
         if (event->type != TRACE_EVENT_DISCOVER_NODE) continue;
+        if (event->node < 0 || (size_t)event->node >= graph->node_count) continue;
         if (state->parent[event->node] != -1) continue;
+        if ((size_t)state->root_count >= state->node_count) continue;
 
         state->roots[state->root_count] = event->node;
         state->root_count++;
@@ -66,8 +127,10 @@ static int measure_subtree(int node, ForestLayoutState *state) {
         return 1;
     }
 
-    for (int i = 0; i < state->child_counts[node]; i++)
-        leaves += measure_subtree(state->children[node][i], state);
+    for (int child = state->first_child[node]; child != -1;
+         child = state->next_sibling[child]) {
+        leaves += measure_subtree(child, state);
+    }
 
     state->subtree_leaves[node] = leaves;
     return leaves;
@@ -90,9 +153,11 @@ static void place_subtree(Graph *graph, ForestLayoutState *state, int node,
     graph->nodes[node].y =
         top + (float)depth * level_gap + node_jitter(node, 1, 18.0f);
 
-    for (int i = 0; i < state->child_counts[node]; i++)
-        place_subtree(graph, state, state->children[node][i], depth + 1, slot_width,
-                      level_gap, left, top, cursor);
+    for (int child = state->first_child[node]; child != -1;
+         child = state->next_sibling[child]) {
+        place_subtree(graph, state, child, depth + 1, slot_width, level_gap, left,
+                      top, cursor);
+    }
 
     if (state->child_counts[node] == 0) {
         *cursor += slot_width;
@@ -100,8 +165,10 @@ static void place_subtree(Graph *graph, ForestLayoutState *state, int node,
     }
 
     float child_leaves = 0.0f;
-    for (int i = 0; i < state->child_counts[node]; i++)
-        child_leaves += (float)state->subtree_leaves[state->children[node][i]];
+    for (int child = state->first_child[node]; child != -1;
+         child = state->next_sibling[child]) {
+        child_leaves += (float)state->subtree_leaves[child];
+    }
     *cursor += subtree_width - child_leaves * slot_width;
 }
 
@@ -110,10 +177,16 @@ void layout_trace_forest(Graph *graph, const Trace *trace, float left, float top
     if (graph->node_count == 0) return;
 
     ForestLayoutState state;
+    if (!forest_layout_state_init(&state, graph->node_count)) {
+        layout_circle(graph, left + width * 0.5f, top + level_gap, width * 0.25f);
+        return;
+    }
+
     build_forest_from_trace(graph, trace, &state);
 
     if (state.root_count == 0) {
         layout_circle(graph, left + width * 0.5f, top + level_gap, width * 0.25f);
+        forest_layout_state_free(&state);
         return;
     }
 
@@ -129,4 +202,6 @@ void layout_trace_forest(Graph *graph, const Trace *trace, float left, float top
     for (int i = 0; i < state.root_count; i++)
         place_subtree(graph, &state, state.roots[i], 0, slot_width, level_gap, left,
                       top, &cursor);
+
+    forest_layout_state_free(&state);
 }

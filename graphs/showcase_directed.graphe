@@ -1,0 +1,224 @@
+# Graphe graph file v1
+# 84 nodes and 126 directed edges.
+# The DFS tree is intentionally broad and uneven, with extra back, forward,
+# and cross edges distributed across the branches.
+directed
+
+node N000
+node N001
+node N002
+node N003
+node N004
+node N005
+node N006
+node N007
+node N008
+node N009
+node N010
+node N011
+node N012
+node N013
+node N014
+node N015
+node N016
+node N017
+node N018
+node N019
+node N020
+node N021
+node N022
+node N023
+node N024
+node N025
+node N026
+node N027
+node N028
+node N029
+node N030
+node N031
+node N032
+node N033
+node N034
+node N035
+node N036
+node N037
+node N038
+node N039
+node N040
+node N041
+node N042
+node N043
+node N044
+node N045
+node N046
+node N047
+node N048
+node N049
+node N050
+node N051
+node N052
+node N053
+node N054
+node N055
+node N056
+node N057
+node N058
+node N059
+node N060
+node N061
+node N062
+node N063
+node N064
+node N065
+node N066
+node N067
+node N068
+node N069
+node N070
+node N071
+node N072
+node N073
+node N074
+node N075
+node N076
+node N077
+node N078
+node N079
+node N080
+node N081
+node N082
+node N083
+
+# DFS tree backbone
+edge N000 N001
+edge N000 N002
+edge N000 N003
+edge N000 N004
+edge N001 N005
+edge N001 N006
+edge N001 N007
+edge N002 N008
+edge N002 N009
+edge N002 N010
+edge N002 N011
+edge N003 N012
+edge N003 N013
+edge N003 N014
+edge N004 N015
+edge N004 N016
+edge N005 N017
+edge N005 N018
+edge N006 N019
+edge N006 N020
+edge N006 N021
+edge N007 N022
+edge N008 N023
+edge N008 N024
+edge N009 N025
+edge N009 N026
+edge N009 N027
+edge N010 N028
+edge N011 N029
+edge N011 N030
+edge N012 N031
+edge N012 N032
+edge N012 N033
+edge N013 N034
+edge N014 N035
+edge N014 N036
+edge N015 N037
+edge N015 N038
+edge N015 N039
+edge N016 N040
+edge N017 N041
+edge N017 N042
+edge N020 N043
+edge N020 N044
+edge N022 N045
+edge N022 N046
+edge N022 N047
+edge N023 N048
+edge N023 N049
+edge N026 N050
+edge N028 N051
+edge N028 N052
+edge N031 N053
+edge N031 N054
+edge N034 N055
+edge N034 N056
+edge N034 N057
+edge N036 N058
+edge N037 N059
+edge N037 N060
+edge N038 N061
+edge N040 N062
+edge N040 N063
+edge N040 N064
+edge N042 N065
+edge N042 N066
+edge N044 N067
+edge N047 N068
+edge N047 N069
+edge N049 N070
+edge N050 N071
+edge N050 N072
+edge N052 N073
+edge N054 N074
+edge N054 N075
+edge N057 N076
+edge N058 N077
+edge N058 N078
+edge N060 N079
+edge N061 N080
+edge N061 N081
+edge N064 N082
+edge N064 N083
+
+# Back edges to ancestors
+edge N005 N001
+edge N017 N005
+edge N041 N017
+edge N065 N041
+edge N020 N006
+edge N067 N044
+edge N022 N007
+edge N048 N023
+edge N071 N050
+edge N054 N031
+edge N076 N057
+edge N058 N036
+edge N079 N060
+edge N083 N064
+edge N040 N004
+
+# Forward edges to already discovered descendants
+edge N001 N041
+edge N001 N067
+edge N005 N065
+edge N006 N044
+edge N007 N068
+edge N002 N048
+edge N002 N071
+edge N009 N050
+edge N011 N070
+edge N003 N053
+edge N003 N076
+edge N013 N055
+edge N004 N079
+edge N016 N083
+
+# Cross edges into earlier completed branches
+edge N002 N017
+edge N009 N042
+edge N026 N021
+edge N050 N018
+edge N003 N024
+edge N012 N029
+edge N034 N049
+edge N057 N072
+edge N004 N031
+edge N015 N056
+edge N038 N074
+edge N040 N025
+edge N064 N068
+edge N083 N055

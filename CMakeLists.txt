@@ -55,7 +55,26 @@ add_executable(graphe
 target_include_directories(graphe PRIVATE src ${raygui_SOURCE_DIR}/src)
 target_link_libraries(graphe PRIVATE raylib)
 
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(graphe_tests
+        tests/graph_traversal_tests.c
+        src/graph.c
+        src/graph_io.c
+        src/traversal.c
+    )
+    target_include_directories(graphe_tests PRIVATE src)
+    add_test(NAME graphe_tests COMMAND graphe_tests)
+    set_tests_properties(graphe_tests PROPERTIES
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    )
+endif()
+
 if(WIN32)
+    target_compile_definitions(graphe PRIVATE _CRT_SECURE_NO_WARNINGS)
+    if(BUILD_TESTING)
+        target_compile_definitions(graphe_tests PRIVATE _CRT_SECURE_NO_WARNINGS)
+    endif()
     target_link_libraries(graphe PRIVATE dwmapi)
 endif()
 

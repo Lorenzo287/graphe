@@ -1,0 +1,19 @@
+# Graphe tree file v1
+tree
+
+# Tree node syntax is: node ID VALUE...
+# Edges use IDs; the displayed traversal output uses VALUE.
+node root =
+node left *
+node right total score
+node a alpha
+node b beta value
+node c gamma
+node d delta
+
+edge root left
+edge root right
+edge left a
+edge left b
+edge right c
+edge right d

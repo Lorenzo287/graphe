@@ -1,20 +1,173 @@
 #include "graph.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+
+static char *copy_string(const char *text) {
+    if (text == NULL) text = "";
+
+    size_t length = strlen(text) + 1;
+    char *copy = malloc(length);
+    if (copy == NULL) return NULL;
+
+    memcpy(copy, text, length);
+    return copy;
+}
+
+static size_t grown_capacity(size_t current, size_t required) {
+    size_t capacity = current == 0 ? 8 : current;
+
+    while (capacity < required) capacity *= 2;
+    return capacity;
+}
 
 void graph_init(Graph *graph) {
     graph->directed = true;
-    graph->node_count = 0;
-    graph->edge_count = 0;
+    graph->nodes = NULL;
+    graph->next_alpha_node = NULL;
     graph->first_alpha_node = -1;
+    graph->first_out = NULL;
+    graph->last_out = NULL;
+    graph->first_alpha_out = NULL;
+    graph->node_count = 0;
+    graph->node_capacity = 0;
+    graph->edges = NULL;
+    graph->edge_count = 0;
+    graph->edge_capacity = 0;
+}
 
-    for (size_t i = 0; i < GRAPHE_MAX_NODES; i++) {
+void graph_free(Graph *graph) {
+    for (size_t i = 0; i < graph->node_count; i++) free(graph->nodes[i].label);
+
+    free(graph->nodes);
+    free(graph->next_alpha_node);
+    free(graph->first_out);
+    free(graph->last_out);
+    free(graph->first_alpha_out);
+    free(graph->edges);
+
+    graph_init(graph);
+}
+
+static bool graph_reserve_nodes(Graph *graph, size_t required) {
+    if (required <= graph->node_capacity) return true;
+
+    size_t old_capacity = graph->node_capacity;
+    size_t capacity = grown_capacity(graph->node_capacity, required);
+
+    Node *nodes = realloc(graph->nodes, capacity * sizeof(*nodes));
+    if (nodes == NULL) return false;
+    graph->nodes = nodes;
+
+    int *next_alpha_node =
+        realloc(graph->next_alpha_node, capacity * sizeof(*next_alpha_node));
+    if (next_alpha_node == NULL) return false;
+    graph->next_alpha_node = next_alpha_node;
+
+    int *first_out = realloc(graph->first_out, capacity * sizeof(*first_out));
+    if (first_out == NULL) return false;
+    graph->first_out = first_out;
+
+    int *last_out = realloc(graph->last_out, capacity * sizeof(*last_out));
+    if (last_out == NULL) return false;
+    graph->last_out = last_out;
+
+    int *first_alpha_out =
+        realloc(graph->first_alpha_out, capacity * sizeof(*first_alpha_out));
+    if (first_alpha_out == NULL) return false;
+    graph->first_alpha_out = first_alpha_out;
+
+    for (size_t i = old_capacity; i < capacity; i++) {
+        graph->nodes[i].label = NULL;
         graph->next_alpha_node[i] = -1;
         graph->first_out[i] = -1;
         graph->last_out[i] = -1;
         graph->first_alpha_out[i] = -1;
     }
+
+    graph->node_capacity = capacity;
+    return true;
+}
+
+static bool graph_reserve_edges(Graph *graph, size_t required) {
+    if (required <= graph->edge_capacity) return true;
+
+    size_t capacity = grown_capacity(graph->edge_capacity, required);
+    Edge *edges = realloc(graph->edges, capacity * sizeof(*edges));
+    if (edges == NULL) return false;
+
+    graph->edges = edges;
+    graph->edge_capacity = capacity;
+    return true;
+}
+
+bool graph_copy(const Graph *source, Graph *out) {
+    Graph copy;
+    graph_init(&copy);
+    copy.directed = source->directed;
+
+    if (!graph_reserve_nodes(&copy, source->node_count)) {
+        graph_free(&copy);
+        return false;
+    }
+
+    copy.node_count = source->node_count;
+    copy.first_alpha_node = source->first_alpha_node;
+    for (size_t i = 0; i < source->node_count; i++) {
+        copy.nodes[i] = source->nodes[i];
+        copy.nodes[i].label = copy_string(source->nodes[i].label);
+        if (copy.nodes[i].label == NULL) {
+            copy.node_count = i;
+            graph_free(&copy);
+            return false;
+        }
+        copy.next_alpha_node[i] = source->next_alpha_node[i];
+        copy.first_out[i] = source->first_out[i];
+        copy.last_out[i] = source->last_out[i];
+        copy.first_alpha_out[i] = source->first_alpha_out[i];
+    }
+
+    if (!graph_reserve_edges(&copy, source->edge_count)) {
+        graph_free(&copy);
+        return false;
+    }
+
+    copy.edge_count = source->edge_count;
+    if (source->edge_count > 0)
+        memcpy(copy.edges, source->edges, source->edge_count * sizeof(*copy.edges));
+
+    graph_free(out);
+    *out = copy;
+    return true;
+}
+
+void graph_copy_node_positions(Graph *to, const Graph *from) {
+    if (to->node_count != from->node_count) return;
+
+    for (size_t i = 0; i < to->node_count; i++) {
+        to->nodes[i].x = from->nodes[i].x;
+        to->nodes[i].y = from->nodes[i].y;
+    }
+}
+
+bool graph_structure_equals(const Graph *left, const Graph *right) {
+    if (left->directed != right->directed) return false;
+    if (left->node_count != right->node_count) return false;
+    if (left->edge_count != right->edge_count) return false;
+
+    for (size_t i = 0; i < left->node_count; i++) {
+        if (strcmp(left->nodes[i].label, right->nodes[i].label) != 0) return false;
+    }
+
+    for (size_t i = 0; i < left->edge_count; i++) {
+        if (left->edges[i].from != right->edges[i].from ||
+            left->edges[i].to != right->edges[i].to) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 int graph_find_node(const Graph *graph, const char *label) {
@@ -51,11 +204,13 @@ static void graph_link_node_by_label(Graph *graph, int node_index) {
 }
 
 int graph_add_node(Graph *graph, const char *label) {
-    if (graph->node_count >= GRAPHE_MAX_NODES) return -1;
+    if (!graph_reserve_nodes(graph, graph->node_count + 1)) return -1;
 
     int node_index = (int)graph->node_count;
     Node *node = &graph->nodes[node_index];
-    snprintf(node->label, sizeof(node->label), "%s", label);
+    node->label = copy_string(label);
+    if (node->label == NULL) return -1;
+
     node->x = 0.0f;
     node->y = 0.0f;
     node->discover_time = -1;
@@ -73,15 +228,17 @@ int graph_add_node(Graph *graph, const char *label) {
     return node_index;
 }
 
-int graph_edge_neighbor(const Graph *graph, int edge_index, int node) {
-    if (edge_index < 0 || (size_t)edge_index >= graph->edge_count) return -1;
-
-    const Edge *edge = &graph->edges[edge_index];
-
+static int edge_neighbor_for_node(const Graph *graph, const Edge *edge, int node) {
     if (edge->from == node) return edge->to;
     if (!graph->directed && edge->to == node) return edge->from;
 
     return -1;
+}
+
+int graph_edge_neighbor(const Graph *graph, int edge_index, int node) {
+    if (edge_index < 0 || (size_t)edge_index >= graph->edge_count) return -1;
+
+    return edge_neighbor_for_node(graph, &graph->edges[edge_index], node);
 }
 
 static int edge_next_for_node(const Graph *graph, int edge_index, int node,
@@ -127,8 +284,10 @@ static void set_edge_next_for_node(Graph *graph, int edge_index, int node,
 
 static int edge_neighbor_follows_label_order(const Graph *graph, int node,
                                              int left_edge, int right_edge) {
-    int left_neighbor = graph_edge_neighbor(graph, left_edge, node);
-    int right_neighbor = graph_edge_neighbor(graph, right_edge, node);
+    int left_neighbor =
+        edge_neighbor_for_node(graph, &graph->edges[left_edge], node);
+    int right_neighbor =
+        edge_neighbor_for_node(graph, &graph->edges[right_edge], node);
 
     if (left_neighbor < 0 || right_neighbor < 0) return 0;
 
@@ -158,24 +317,24 @@ static void graph_link_edge_by_target_label(Graph *graph, int node, int edge_ind
         return;
     }
 
-    while (edge_next_for_node(graph, current, node, true) != -1) {
-        int next = edge_next_for_node(graph, current, node, true);
+    int next = edge_next_for_node(graph, current, node, true);
+    while (next != -1) {
         if (edge_neighbor_follows_label_order(graph, node, edge_index, next)) break;
         current = next;
+        next = edge_next_for_node(graph, current, node, true);
     }
 
-    set_edge_next_for_node(graph, edge_index, node,
-                           edge_next_for_node(graph, current, node, true), true);
+    set_edge_next_for_node(graph, edge_index, node, next, true);
     set_edge_next_for_node(graph, current, node, edge_index, true);
 }
 
 int graph_add_edge(Graph *graph, int from, int to) {
-    if (graph->edge_count >= GRAPHE_MAX_EDGES) return -1;
-
     if (from < 0 || to < 0) return -1;
 
     if ((size_t)from >= graph->node_count || (size_t)to >= graph->node_count)
         return -1;
+
+    if (!graph_reserve_edges(graph, graph->edge_count + 1)) return -1;
 
     int edge_index = (int)graph->edge_count;
     Edge *edge = &graph->edges[edge_index];
@@ -202,71 +361,49 @@ bool graph_edge_is_visible(const Graph *graph, int edge_index) {
     return edge_index >= 0 && (size_t)edge_index < graph->edge_count;
 }
 
-bool graph_set_directed(Graph *graph, bool directed) {
-    if (graph->directed == directed) return true;
-
-    typedef struct SavedNode {
-        char label[sizeof(graph->nodes[0].label)];
-        float x;
-        float y;
-    } SavedNode;
-
-    typedef struct SavedEdge {
-        int from;
-        int to;
-    } SavedEdge;
-
-    SavedNode nodes[GRAPHE_MAX_NODES];
-    SavedEdge edges[GRAPHE_MAX_EDGES];
-    size_t node_count = graph->node_count;
-    size_t edge_count = 0;
-
-    for (size_t i = 0; i < graph->node_count; i++) {
-        snprintf(nodes[i].label, sizeof(nodes[i].label), "%s",
-                 graph->nodes[i].label);
-        nodes[i].x = graph->nodes[i].x;
-        nodes[i].y = graph->nodes[i].y;
-    }
-
+static bool graph_has_undirected_pair(const Graph *graph, int from, int to) {
     for (size_t i = 0; i < graph->edge_count; i++) {
-        if (!graph_edge_is_visible(graph, (int)i)) continue;
-
         const Edge *edge = &graph->edges[i];
-        bool duplicate_pair = false;
-        if (!directed) {
-            for (size_t saved = 0; saved < edge_count; saved++) {
-                if ((edges[saved].from == edge->from &&
-                     edges[saved].to == edge->to) ||
-                    (edges[saved].from == edge->to &&
-                     edges[saved].to == edge->from)) {
-                    duplicate_pair = true;
-                    break;
-                }
-            }
+
+        if ((edge->from == from && edge->to == to) ||
+            (edge->from == to && edge->to == from)) {
+            return true;
         }
-        if (duplicate_pair) continue;
-
-        if (edge_count >= GRAPHE_MAX_EDGES) return false;
-
-        edges[edge_count].from = edge->from;
-        edges[edge_count].to = edge->to;
-        edge_count++;
     }
 
-    graph_init(graph);
-    graph->directed = directed;
+    return false;
+}
 
-    for (size_t i = 0; i < node_count; i++) {
-        int node_index = graph_add_node(graph, nodes[i].label);
-        if (node_index < 0) return false;
-        graph->nodes[node_index].x = nodes[i].x;
-        graph->nodes[node_index].y = nodes[i].y;
+bool graph_build_view(const Graph *source, bool directed, Graph *out) {
+    Graph view;
+    graph_init(&view);
+    view.directed = directed;
+
+    for (size_t i = 0; i < source->node_count; i++) {
+        int node_index = graph_add_node(&view, source->nodes[i].label);
+        if (node_index < 0) {
+            graph_free(&view);
+            return false;
+        }
+
+        view.nodes[node_index].x = source->nodes[i].x;
+        view.nodes[node_index].y = source->nodes[i].y;
     }
 
-    for (size_t i = 0; i < edge_count; i++) {
-        if (graph_add_edge(graph, edges[i].from, edges[i].to) < 0) return false;
+    for (size_t i = 0; i < source->edge_count; i++) {
+        const Edge *edge = &source->edges[i];
+
+        if (!directed && graph_has_undirected_pair(&view, edge->from, edge->to))
+            continue;
+
+        if (graph_add_edge(&view, edge->from, edge->to) < 0) {
+            graph_free(&view);
+            return false;
+        }
     }
 
+    graph_free(out);
+    *out = view;
     return true;
 }
 

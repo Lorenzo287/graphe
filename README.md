@@ -24,7 +24,7 @@ The initial version contains:
 - BFS level labels and a depth gradient on visited nodes;
 - directed and undirected graph semantics for DFS, including arrow rendering and
   undirected DFS edge classification;
-- graph import from a small text format;
+- graph and tree import from a small text format with dynamic storage;
 - a first expression-tree traversal mode with preorder, inorder, and postorder
   output;
 - circular, manual, and traversal-forest layouts;
@@ -50,6 +50,11 @@ cmake --build build/gcc-debug
 
 This uses GCC + Ninja and does not require the Visual Studio developer shell.
 CMake also writes `build/gcc-debug/compile_commands.json` for clangd.
+Run focused tests with:
+
+```sh
+ctest --test-dir build/gcc-debug --output-on-failure
+```
 
 Configure and build an optimized release executable:
 
@@ -97,7 +102,7 @@ Dragging a node switches the layout mode to manual.
 ## Graph Files
 
 Settings includes a path field and `Load` button for `.graphe` files. The format
-is line-oriented:
+is line-oriented. Graph files use node labels directly:
 
 ```text
 # comments are ignored
@@ -108,12 +113,24 @@ edge A B
 ```
 
 Use `undirected` instead of `directed` for an undirected graph. `node` lines are
-optional for nodes that appear in edges, but useful for isolated nodes. Labels
-are single words up to 15 characters.
+optional for nodes that appear in edges, but useful for isolated nodes. Graph
+labels are single words.
 
-Example files live in `graphs/sample_directed.graphe` and
-`graphs/sample_undirected.graphe`. The current loader still uses the project’s
-fixed graph limits: 16 nodes and 64 edges.
+Tree files start with `tree`. Tree nodes have stable single-word IDs for edges,
+plus a displayed value that can contain spaces:
+
+```text
+tree
+node root +
+node left beta value
+node right gamma
+edge root left
+edge root right
+```
+
+Loading a tree file switches the app to tree traversal mode. Example files live
+in `graphs/sample_directed.graphe`, `graphs/sample_undirected.graphe`,
+`graphs/sample_tree.graphe`, and `graphs/showcase_directed.graphe`.
 
 ## Fonts
 
