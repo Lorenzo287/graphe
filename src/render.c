@@ -289,24 +289,37 @@ static Vector2 quadratic_point(Vector2 start, Vector2 control, Vector2 end,
 #define GRAPHE_ARROW_WIDTH 11.0f
 #define GRAPHE_ARROW_BODY_OVERLAP 0.5f
 
-static Vector2 arrow_base_point(Vector2 tip, Vector2 direction) {
-    return vector_subtract(tip, vector_scale(direction, GRAPHE_ARROW_LENGTH));
-}
-
 static Vector2 edge_body_arrow_endpoint(Vector2 tip, Vector2 direction) {
     return vector_subtract(
         tip,
         vector_scale(direction, GRAPHE_ARROW_LENGTH - GRAPHE_ARROW_BODY_OVERLAP));
 }
 
-static void draw_arrowhead(Vector2 tip, Vector2 direction, Color color) {
+static void draw_arrowhead_shape(Vector2 tip, Vector2 direction, float length,
+                                 float width, Color color) {
     Vector2 normal = {-direction.y, direction.x};
-    Vector2 base = arrow_base_point(tip, direction);
-    Vector2 left = vector_add(base, vector_scale(normal, GRAPHE_ARROW_WIDTH * 0.5f));
-    Vector2 right =
-        vector_subtract(base, vector_scale(normal, GRAPHE_ARROW_WIDTH * 0.5f));
+    Vector2 base = vector_subtract(tip, vector_scale(direction, length));
+    Vector2 left = vector_add(base, vector_scale(normal, width * 0.5f));
+    Vector2 right = vector_subtract(base, vector_scale(normal, width * 0.5f));
 
     DrawTriangle(tip, right, left, color);
+}
+
+static void draw_arrowhead(Vector2 tip, Vector2 direction, Color color) {
+    draw_arrowhead_shape(tip, direction, GRAPHE_ARROW_LENGTH, GRAPHE_ARROW_WIDTH,
+                         color);
+}
+
+static void draw_arrowhead_glow(Vector2 tip, Vector2 direction, Color color) {
+    const float lengths[] = {21.0f, 18.0f, 16.0f};
+    const float widths[] = {18.0f, 15.0f, 12.5f};
+    const unsigned char alphas[] = {14, 22, 32};
+
+    for (int i = 0; i < 3; i++) {
+        Color glow = color;
+        glow.a = alphas[i];
+        draw_arrowhead_shape(tip, direction, lengths[i], widths[i], glow);
+    }
 }
 
 static void draw_text(const RenderResources *resources, const char *text,
@@ -395,6 +408,32 @@ static void draw_quadratic_edge(Vector2 start, Vector2 control, Vector2 end,
         DrawLineEx(previous, current, thickness, color);
         previous = current;
     }
+}
+
+static void draw_edge_path(EdgeGeometry geometry, Vector2 end, float thickness,
+                           Color color) {
+    if (geometry.bend <= 0.0f) {
+        DrawLineEx(geometry.start, end, thickness, color);
+        return;
+    }
+
+    draw_quadratic_edge(geometry.start, geometry.control, end, thickness, color);
+}
+
+static void draw_edge_glow(EdgeGeometry geometry, Vector2 end, Color color) {
+    const float widths[] = {15.0f, 10.0f, 6.0f};
+    const unsigned char alphas[] = {20, 32, 50};
+
+    for (int i = 0; i < 3; i++) {
+        Color glow = color;
+        glow.a = alphas[i];
+        draw_edge_path(geometry, end, widths[i], glow);
+    }
+}
+
+static Vector2 edge_glow_arrow_endpoint(Vector2 tip, Vector2 direction) {
+    return vector_subtract(tip,
+                           vector_scale(direction, GRAPHE_ARROW_LENGTH * 1.0));
 }
 
 static float clamp_float(float value, float min, float max) {
@@ -492,28 +531,29 @@ static void draw_edge_body(const Graph *graph, size_t edge_index, int active,
         active_examine
             ? theme->active
             : edge_render_color(theme, graph->edges[edge_index].type, options);
-    float thickness = active ? 5.0f : 2.5f;
     Vector2 end = graph->directed ? edge_body_arrow_endpoint(geometry.end,
                                                              geometry.end_direction)
                                   : geometry.end;
+    Vector2 glow_end = graph->directed ? edge_glow_arrow_endpoint(
+                                             geometry.end, geometry.end_direction)
+                                       : end;
 
-    if (geometry.bend <= 0.0f) {
-        DrawLineEx(geometry.start, end, thickness, color);
-        return;
-    }
-
-    draw_quadratic_edge(geometry.start, geometry.control, end, thickness, color);
+    if (active_examine) draw_edge_glow(geometry, glow_end, theme->active);
+    draw_edge_path(geometry, end, 2.5f, color);
 }
 
-static void draw_edge_arrow(const Graph *graph, size_t edge_index, int active,
+static void draw_edge_arrow(const Graph *graph, size_t edge_index,
                             int active_examine, const Theme *theme,
                             const RenderOptions *options) {
-    EdgeGeometry geometry = make_edge_geometry(graph, edge_index, active, options);
+    EdgeGeometry geometry =
+        make_edge_geometry(graph, edge_index, active_examine, options);
     Color color =
         active_examine
             ? theme->active
             : edge_render_color(theme, graph->edges[edge_index].type, options);
 
+    if (active_examine)
+        draw_arrowhead_glow(geometry.end, geometry.end_direction, theme->active);
     draw_arrowhead(geometry.end, geometry.end_direction, color);
 }
 
@@ -552,6 +592,28 @@ static void draw_level_label(const RenderResources *resources, const Node *node,
               15.0f, color);
 }
 
+static void draw_node_glow(Vector2 center, Color color) {
+    const float inner_radii[] = {
+        GRAPHE_NODE_RADIUS + 1.0f,
+        GRAPHE_NODE_RADIUS,
+        GRAPHE_NODE_RADIUS,
+        GRAPHE_NODE_RADIUS,
+    };
+    const float outer_radii[] = {
+        GRAPHE_NODE_RADIUS + 9.0f,
+        GRAPHE_NODE_RADIUS + 6.0f,
+        GRAPHE_NODE_RADIUS + 4.0f,
+        GRAPHE_NODE_RADIUS + 2.0f,
+    };
+    const unsigned char alphas[] = {18, 25, 37, 52};
+
+    for (int i = 0; i < 4; i++) {
+        Color glow = color;
+        glow.a = alphas[i];
+        DrawRing(center, inner_radii[i], outer_radii[i], 0, 360, 64, glow);
+    }
+}
+
 static void draw_node(const RenderResources *resources, const Node *node, int active,
                       const Theme *theme, const RenderOptions *options,
                       int max_level) {
@@ -560,7 +622,7 @@ static void draw_node(const RenderResources *resources, const Node *node, int ac
     bool show_level = options->algorithm_mode == ALGORITHM_BFS;
     Color fill = show_level ? bfs_level_fill_color(theme, node, max_level)
                             : node_fill_color(theme, node->color);
-    Color outline = active ? theme->active : theme->node_outline;
+    Color outline = theme->node_outline;
     Color label_color = show_level                  ? node_text_color(fill)
                         : node->color == NODE_BLACK ? RAYWHITE
                                                     : (Color){0, 0, 0, 255};
@@ -569,15 +631,10 @@ static void draw_node(const RenderResources *resources, const Node *node, int ac
 
     time_color.a = 220;
 
+    if (active) draw_node_glow(center, theme->active);
     DrawCircleV(center, GRAPHE_NODE_RADIUS, fill);
     DrawRing(center, GRAPHE_NODE_RADIUS - 2.5f, GRAPHE_NODE_RADIUS, 0, 360, 64,
              outline);
-    // DrawCircleLinesV(center, GRAPHE_NODE_RADIUS, outline);
-    // DrawCircleLinesV(center, GRAPHE_NODE_RADIUS - 1.0f, outline);
-    if (active)
-        DrawRing(center, GRAPHE_NODE_RADIUS - 2.5f + 5.0f, GRAPHE_NODE_RADIUS + 4.0f,
-                 0, 360, 64, theme->active);
-    // DrawCircleLinesV(center, GRAPHE_NODE_RADIUS + 5.0f, theme->active);
 
     float label_y = show_times || show_level ? node->y - label_size.y + 3.0f
                                              : node->y - label_size.y * 0.5f;
@@ -1355,7 +1412,7 @@ RenderUiResult render_graph(const Graph *graph, const Trace *trace,
     if (graph->directed) {
         for (size_t i = 0; i < graph->edge_count; i++) {
             if (!graph_edge_is_visible(graph, (int)i)) continue;
-            draw_edge_arrow(graph, i, is_active_edge(graph, trace, active_index, i),
+            draw_edge_arrow(graph, i,
                             is_active_examine_edge(graph, trace, active_index, i),
                             &theme, options);
         }
