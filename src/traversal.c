@@ -185,6 +185,11 @@ static void finish_node(TraversalState *state, Trace *trace, int node) {
     push_event(trace, make_node_event(TRACE_EVENT_FINISH_NODE, node, state->time));
 }
 
+/*
+ * DFS edge classification needs discovery times and current colors. Gray targets
+ * are ancestors, white targets become tree edges, and finished descendants vs
+ * unrelated finished nodes split forward from cross edges.
+ */
 static EdgeType classify_dfs_seen_edge(const TraversalState *state, int from,
                                        int to) {
     if (state->colors[to] == NODE_GRAY) return EDGE_BACK;
@@ -201,6 +206,11 @@ static bool is_reverse_parent_edge(const Graph *graph, int edge_id,
     return parent_edge == edge_id;
 }
 
+/*
+ * Emits the DFS teaching trace: discover node, examine edge, classify edge, then
+ * finish node. Undirected graphs classify each physical edge once even though it
+ * appears in both endpoint adjacency lists.
+ */
 static void dfs_visit_node(const Graph *graph, int node, int parent_edge,
                            const TraversalOptions *options, TraversalState *state,
                            Trace *trace) {
@@ -258,6 +268,11 @@ static void build_dfs_trace(const Graph *graph, const TraversalOptions *options,
     traversal_state_free(&state);
 }
 
+/*
+ * BFS uses levels as its primary educational state. Tree edges discover new
+ * nodes and assign their level; already-reached neighbors are emitted as cross
+ * edges for visualization without teaching DFS-style edge classes.
+ */
 static void build_bfs_trace(const Graph *graph, const TraversalOptions *options,
                             Trace *trace) {
     TraversalState state;
@@ -328,6 +343,11 @@ static void build_bfs_trace(const Graph *graph, const TraversalOptions *options,
     traversal_state_free(&state);
 }
 
+/*
+ * Tree traversal deliberately uses insertion-order children. Tree files are
+ * ordered examples, and alphabetical sorting would change the printed sequence
+ * the user is trying to study.
+ */
 static void tree_visit_node(const Graph *graph, int node,
                             const TraversalOptions *options, TraversalState *state,
                             Trace *trace) {
@@ -366,6 +386,11 @@ static void tree_visit_node(const Graph *graph, int node,
         discover_node(state, trace, node);
 }
 
+/*
+ * Finds structural roots for tree mode instead of relying on label order, then
+ * visits disconnected leftovers defensively so malformed in-memory samples still
+ * produce a complete trace.
+ */
 static void build_tree_trace(const Graph *graph, const TraversalOptions *options,
                              Trace *trace) {
     TraversalState state;
@@ -398,6 +423,10 @@ static void build_tree_trace(const Graph *graph, const TraversalOptions *options
     traversal_state_free(&state);
 }
 
+/*
+ * Builds a mode-specific trace without exposing rendering concerns to traversal
+ * code. The renderer later applies a prefix of this trace for playback.
+ */
 void traversal_trace_build(const Graph *graph, const TraversalOptions *options,
                            Trace *trace) {
     if (options == NULL) options = &default_options;
@@ -418,6 +447,11 @@ void traversal_trace_build(const Graph *graph, const TraversalOptions *options,
     }
 }
 
+/*
+ * Replays the first event_count trace events onto a fresh visual copy of the
+ * base graph. This is what makes jumping backward cheap and deterministic:
+ * rebuild state from the trace instead of undoing events.
+ */
 void traversal_trace_apply_prefix(const Graph *base, const Trace *trace,
                                   size_t event_count, Graph *out) {
     if (!graph_structure_equals(out, base)) {

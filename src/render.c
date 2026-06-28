@@ -5,6 +5,7 @@
 
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 typedef struct Theme {
     Color background;
@@ -35,6 +36,14 @@ typedef struct EdgeGeometry {
     Vector2 end_direction;
     float bend;
 } EdgeGeometry;
+
+struct EdgeCurveCacheEntry {
+    bool valid;
+    int from;
+    int to;
+    EdgeType type;
+    float sign;
+};
 
 static Theme light_theme(void) {
     return (Theme){
@@ -70,7 +79,7 @@ static Theme dark_theme(void) {
         .node_white = {233, 234, 236, 255},
         .node_gray = {225, 118, 21, 255},
         // .node_gray = {192, 185, 74, 255},
-        .node_black = {12, 22, 35, 255},
+        .node_black = {2, 12, 25, 255},
         .node_outline = {107, 114, 128, 255},
         .active = {225, 118, 21, 255},
         // .active = {192, 185, 74, 255},
@@ -80,7 +89,7 @@ static Theme dark_theme(void) {
         .edge_back = {248, 93, 93, 255},
         .edge_forward = {96, 165, 250, 255},
         .edge_cross = {192, 132, 252, 255},
-        .button = {85, 85, 91, 255},
+        .button = {87, 87, 93, 255},
         .button_hover = {75, 85, 99, 255},
         .button_active = {30, 64, 175, 255},
         .overlay = {3, 7, 18, 190},
@@ -152,22 +161,22 @@ Color render_background_color(const RenderOptions *options) {
     return theme_for_options(options).background;
 }
 
-static unsigned char color_mix_channel(unsigned char from, unsigned char to,
-                                       float amount) {
-    return (unsigned char)((float)from + ((float)to - (float)from) * amount);
-}
-
-static Color color_mix(Color from, Color to, float amount) {
-    if (amount < 0.0f) amount = 0.0f;
-    if (amount > 1.0f) amount = 1.0f;
-
-    return (Color){
-        color_mix_channel(from.r, to.r, amount),
-        color_mix_channel(from.g, to.g, amount),
-        color_mix_channel(from.b, to.b, amount),
-        color_mix_channel(from.a, to.a, amount),
-    };
-}
+// static unsigned char color_mix_channel(unsigned char from, unsigned char to,
+//                                        float amount) {
+//     return (unsigned char)((float)from + ((float)to - (float)from) * amount);
+// }
+//
+// static Color color_mix(Color from, Color to, float amount) {
+//     if (amount < 0.0f) amount = 0.0f;
+//     if (amount > 1.0f) amount = 1.0f;
+//
+//     return (Color){
+//         color_mix_channel(from.r, to.r, amount),
+//         color_mix_channel(from.g, to.g, amount),
+//         color_mix_channel(from.b, to.b, amount),
+//         color_mix_channel(from.a, to.a, amount),
+//     };
+// }
 
 static bool color_is_dark(Color color) {
     int luminance = (int)color.r * 299 + (int)color.g * 587 + (int)color.b * 114;
@@ -191,18 +200,26 @@ static Color node_fill_color(const Theme *theme, NodeColor color) {
     }
 }
 
-static Color bfs_level_fill_color(const Theme *theme, const Node *node,
-                                  int max_level) {
+static Color tree_node_fill_color(const Theme *theme, const Node *node) {
+    if (node->color == NODE_WHITE) return theme->node_white;
+
+    return theme->node_black;
+}
+
+/*
+ * BFS uses discrete level bands instead of a stretched gradient. The colors are
+ * anchored near DFS's finished-node color so the final state feels visually
+ * related across algorithms.
+ */
+static Color bfs_level_fill_color(const Theme *theme, const Node *node) {
     if (node->level < 0) return theme->node_white;
-    if (max_level <= 0) return theme->node_gray;
 
-    Color shallow = theme->edge_tree;
-    Color middle = theme->node_gray;
-    Color deep = theme->edge_forward;
-    float amount = (float)node->level / (float)max_level;
+    // Color even_level = color_mix(theme->node_black, theme->edge_forward, 0.34f);
+    // Color odd_level = color_mix(theme->node_black, theme->node_gray, 0.38f);
+    Color even_level = {2, 12, 25, 255};
+    Color odd_level = {225, 118, 21, 255};
 
-    if (amount <= 0.5f) return color_mix(shallow, middle, amount * 2.0f);
-    return color_mix(middle, deep, (amount - 0.5f) * 2.0f);
+    return node->level % 2 == 0 ? even_level : odd_level;
 }
 
 static Color edge_color(const Theme *theme, EdgeType type) {
@@ -232,18 +249,6 @@ static int max_bfs_level(const Graph *graph) {
 
     for (size_t i = 0; i < graph->node_count; i++) {
         if (graph->nodes[i].level > max_level) max_level = graph->nodes[i].level;
-    }
-
-    return max_level;
-}
-
-static int max_bfs_trace_level(const Trace *trace) {
-    int max_level = 0;
-
-    for (size_t i = 0; i < trace->count; i++) {
-        const TraceEvent *event = &trace->events[i];
-        if (event->type != TRACE_EVENT_DISCOVER_NODE) continue;
-        if (event->time > max_level) max_level = event->time;
     }
 
     return max_level;
@@ -313,6 +318,7 @@ static void draw_arrowhead(Vector2 tip, Vector2 direction, Color color) {
                          color);
 }
 
+#ifdef GRAPHE_GLOW
 static void draw_arrowhead_glow(Vector2 tip, Vector2 direction, Color color) {
     const float lengths[] = {21.0f, 18.0f, 16.0f};
     const float widths[] = {18.0f, 15.0f, 12.5f};
@@ -324,6 +330,7 @@ static void draw_arrowhead_glow(Vector2 tip, Vector2 direction, Color color) {
         draw_arrowhead_shape(tip, direction, lengths[i], widths[i], glow);
     }
 }
+#endif
 
 static void draw_text(const RenderResources *resources, const char *text,
                       Vector2 position, float size, Color color) {
@@ -353,6 +360,8 @@ void render_resources_load(RenderResources *resources) {
     resources->graph_background_height = 0;
     resources->graph_background_dark_mode = false;
     resources->graph_background_ui_scale = 0.0f;
+    resources->edge_curve_cache = NULL;
+    resources->edge_curve_cache_capacity = 0;
 
     for (size_t i = 0; i < sizeof(font_paths) / sizeof(font_paths[0]); i++) {
         if (!FileExists(font_paths[i])) continue;
@@ -379,8 +388,23 @@ static void unload_graph_background(RenderResources *resources) {
 
 void render_resources_unload(RenderResources *resources) {
     unload_graph_background(resources);
+    free(resources->edge_curve_cache);
+    resources->edge_curve_cache = NULL;
+    resources->edge_curve_cache_capacity = 0;
     if (resources->custom_font_loaded) UnloadFont(resources->font);
     resources->custom_font_loaded = false;
+}
+
+/*
+ * Clears cached edge curve choices when graph structure, trace classifications,
+ * or automatic layout changes. Manual node dragging intentionally keeps the
+ * cached side so curves do not flip while the user is editing positions.
+ */
+void render_clear_edge_curve_cache(RenderResources *resources) {
+    if (resources == NULL || resources->edge_curve_cache == NULL) return;
+
+    for (size_t i = 0; i < resources->edge_curve_cache_capacity; i++)
+        resources->edge_curve_cache[i].valid = false;
 }
 
 static int event_matches_visible_edge(const Graph *graph, int event_edge,
@@ -438,6 +462,7 @@ static void draw_edge_path(EdgeGeometry geometry, Vector2 end, float thickness,
     draw_quadratic_edge(geometry.start, geometry.control, end, thickness, color);
 }
 
+#ifdef GRAPHE_GLOW
 static void draw_edge_glow(EdgeGeometry geometry, Vector2 end, Color color) {
     const float widths[] = {15.0f, 10.0f, 6.0f};
     const unsigned char alphas[] = {20, 32, 50};
@@ -452,6 +477,7 @@ static void draw_edge_glow(EdgeGeometry geometry, Vector2 end, Color color) {
 static Vector2 edge_glow_arrow_endpoint(Vector2 tip, Vector2 direction) {
     return vector_subtract(tip, vector_scale(direction, GRAPHE_ARROW_LENGTH * 1.0));
 }
+#endif
 
 static float clamp_float(float value, float min, float max) {
     if (value < min) return min;
@@ -461,6 +487,12 @@ static float clamp_float(float value, float min, float max) {
 
 static float vector_length(Vector2 value) {
     return sqrtf(value.x * value.x + value.y * value.y);
+}
+
+static float vector_distance_squared(Vector2 a, Vector2 b) {
+    float dx = a.x - b.x;
+    float dy = a.y - b.y;
+    return dx * dx + dy * dy;
 }
 
 static float edge_bend_amount(EdgeType type, float distance) {
@@ -483,8 +515,8 @@ static float edge_bend_amount(EdgeType type, float distance) {
     return clamp_float(distance * factor, 18.0f, 70.0f);
 }
 
-static float edge_curve_sign(const Node *from, const Node *to, EdgeType type,
-                             const RenderOptions *options) {
+static float fallback_edge_curve_sign(const Node *from, const Node *to,
+                                      EdgeType type, const RenderOptions *options) {
     Vector2 mid = {(from->x + to->x) * 0.5f, (from->y + to->y) * 0.5f};
 
     if (type == EDGE_BACK || type == EDGE_FORWARD) {
@@ -495,7 +527,164 @@ static float edge_curve_sign(const Node *from, const Node *to, EdgeType type,
     return from->x <= to->x ? 1.0f : -1.0f;
 }
 
-static EdgeGeometry make_edge_geometry(const Graph *graph, size_t edge_index,
+static EdgeGeometry curved_edge_geometry(const Node *from, const Node *to,
+                                         EdgeGeometry geometry, Vector2 normal,
+                                         float bend, float sign,
+                                         float node_padding) {
+    Vector2 start_center = {from->x, from->y};
+    Vector2 end_center = {to->x, to->y};
+    Vector2 mid = vector_scale(vector_add(geometry.start, geometry.end), 0.5f);
+
+    geometry.control = vector_add(mid, vector_scale(normal, bend * sign));
+    geometry.start =
+        vector_add(start_center, vector_scale(vector_normalize(vector_subtract(
+                                                  geometry.control, start_center)),
+                                              GRAPHE_NODE_RADIUS));
+    geometry.end = vector_add(
+        end_center,
+        vector_scale(vector_normalize(vector_subtract(geometry.control, end_center)),
+                     GRAPHE_NODE_RADIUS + node_padding));
+    geometry.end_direction =
+        vector_normalize(vector_subtract(geometry.end, geometry.control));
+    geometry.bend = bend;
+
+    return geometry;
+}
+
+/*
+ * Scores how much a candidate curve passes near other nodes. This is used only
+ * when choosing a curve side; normal frames reuse the cached sign.
+ */
+static float edge_node_clutter_score(const Graph *graph, size_t edge_index,
+                                     EdgeGeometry geometry) {
+    const Edge *edge = &graph->edges[edge_index];
+    const int sample_count = 9;
+    const float near_radius = GRAPHE_NODE_RADIUS * 2.35f;
+    const float overlap_radius = GRAPHE_NODE_RADIUS * 1.35f;
+    const float near_radius_sq = near_radius * near_radius;
+    const float overlap_radius_sq = overlap_radius * overlap_radius;
+    float score = 0.0f;
+
+    for (size_t node_index = 0; node_index < graph->node_count; node_index++) {
+        if ((int)node_index == edge->from || (int)node_index == edge->to) continue;
+
+        Vector2 node_center = {graph->nodes[node_index].x,
+                               graph->nodes[node_index].y};
+        float best_distance_sq = near_radius_sq;
+
+        for (int sample = 1; sample <= sample_count; sample++) {
+            float t = (float)sample / (float)(sample_count + 1);
+            Vector2 point =
+                quadratic_point(geometry.start, geometry.control, geometry.end, t);
+            float distance_sq = vector_distance_squared(point, node_center);
+
+            if (distance_sq < best_distance_sq) best_distance_sq = distance_sq;
+        }
+
+        if (best_distance_sq >= near_radius_sq) continue;
+
+        score += (near_radius_sq - best_distance_sq) / near_radius_sq;
+        if (best_distance_sq < overlap_radius_sq)
+            score +=
+                4.0f * (overlap_radius_sq - best_distance_sq) / overlap_radius_sq;
+    }
+
+    return score;
+}
+
+/*
+ * Ensures the cache has a slot for each edge index. Cache entries are keyed by
+ * endpoint and edge type so reused edge indices do not accidentally preserve a
+ * stale curve side after graph or trace changes.
+ */
+static bool edge_curve_cache_reserve(RenderResources *resources,
+                                     size_t required_capacity) {
+    if (required_capacity <= resources->edge_curve_cache_capacity) return true;
+
+    size_t capacity = resources->edge_curve_cache_capacity == 0
+                          ? 64
+                          : resources->edge_curve_cache_capacity;
+    while (capacity < required_capacity) capacity *= 2;
+
+    EdgeCurveCacheEntry *entries =
+        realloc(resources->edge_curve_cache, capacity * sizeof(*entries));
+    if (entries == NULL) return false;
+
+    for (size_t i = resources->edge_curve_cache_capacity; i < capacity; i++)
+        entries[i].valid = false;
+
+    resources->edge_curve_cache = entries;
+    resources->edge_curve_cache_capacity = capacity;
+    return true;
+}
+
+static bool edge_curve_cache_get(const RenderResources *resources, size_t edge_index,
+                                 const Edge *edge, float *sign) {
+    if (edge_index >= resources->edge_curve_cache_capacity) return false;
+
+    const EdgeCurveCacheEntry *entry = &resources->edge_curve_cache[edge_index];
+    if (!entry->valid) return false;
+    if (entry->from != edge->from || entry->to != edge->to ||
+        entry->type != edge->type) {
+        return false;
+    }
+
+    *sign = entry->sign;
+    return true;
+}
+
+static void edge_curve_cache_set(RenderResources *resources, size_t edge_index,
+                                 const Edge *edge, float sign) {
+    if (!edge_curve_cache_reserve(resources, edge_index + 1)) return;
+
+    EdgeCurveCacheEntry *entry = &resources->edge_curve_cache[edge_index];
+    entry->valid = true;
+    entry->from = edge->from;
+    entry->to = edge->to;
+    entry->type = edge->type;
+    entry->sign = sign;
+}
+
+/*
+ * Chooses which side of the straight edge the curve should bend toward. Both
+ * sides are scored against nearby nodes once, then the chosen sign is cached for
+ * stable, cheap rendering.
+ */
+static float edge_curve_sign(RenderResources *resources, const Graph *graph,
+                             size_t edge_index, EdgeGeometry base_geometry,
+                             Vector2 normal, float bend, float node_padding,
+                             const RenderOptions *options) {
+    const Edge *edge = &graph->edges[edge_index];
+    const Node *from = &graph->nodes[edge->from];
+    const Node *to = &graph->nodes[edge->to];
+    float sign;
+
+    if (edge_curve_cache_get(resources, edge_index, edge, &sign)) return sign;
+
+    EdgeGeometry positive = curved_edge_geometry(from, to, base_geometry, normal,
+                                                 bend, 1.0f, node_padding);
+    EdgeGeometry negative = curved_edge_geometry(from, to, base_geometry, normal,
+                                                 bend, -1.0f, node_padding);
+    float positive_score = edge_node_clutter_score(graph, edge_index, positive);
+    float negative_score = edge_node_clutter_score(graph, edge_index, negative);
+    float score_delta = positive_score - negative_score;
+
+    if (fabsf(score_delta) > 0.05f) {
+        sign = score_delta < 0.0f ? 1.0f : -1.0f;
+    } else {
+        sign = fallback_edge_curve_sign(from, to, edge->type, options);
+    }
+
+    edge_curve_cache_set(resources, edge_index, edge, sign);
+    return sign;
+}
+
+/*
+ * Computes all geometry needed by both the edge body and arrowhead. Curved
+ * edges adjust their start/end points so the curve still meets node boundaries.
+ */
+static EdgeGeometry make_edge_geometry(RenderResources *resources,
+                                       const Graph *graph, size_t edge_index,
                                        int active, const RenderOptions *options) {
     const Edge *edge = &graph->edges[edge_index];
     const Node *from = &graph->nodes[edge->from];
@@ -521,29 +710,17 @@ static EdgeGeometry make_edge_geometry(const Graph *graph, size_t edge_index,
 
     if (bend <= 0.0f) return geometry;
 
-    Vector2 mid = vector_scale(vector_add(geometry.start, geometry.end), 0.5f);
     Vector2 normal = {-direction.y, direction.x};
-    float sign = edge_curve_sign(from, to, edge->type, options);
-    geometry.control = vector_add(mid, vector_scale(normal, bend * sign));
-    geometry.start =
-        vector_add(start_center, vector_scale(vector_normalize(vector_subtract(
-                                                  geometry.control, start_center)),
-                                              GRAPHE_NODE_RADIUS));
-    geometry.end = vector_add(
-        end_center,
-        vector_scale(vector_normalize(vector_subtract(geometry.control, end_center)),
-                     GRAPHE_NODE_RADIUS + node_padding));
-    geometry.end_direction =
-        vector_normalize(vector_subtract(geometry.end, geometry.control));
-    geometry.bend = bend;
+    float sign = edge_curve_sign(resources, graph, edge_index, geometry, normal,
+                                 bend, node_padding, options);
 
-    return geometry;
+    return curved_edge_geometry(from, to, geometry, normal, bend, sign,
+                                node_padding);
 }
 
-static void draw_edge_body(const Graph *graph, size_t edge_index, int active,
-                           int active_examine, const Theme *theme,
-                           const RenderOptions *options) {
-    EdgeGeometry geometry = make_edge_geometry(graph, edge_index, active, options);
+static void draw_edge_body(const Graph *graph, size_t edge_index,
+                           EdgeGeometry geometry, int active_examine,
+                           const Theme *theme, const RenderOptions *options) {
     Color color =
         active_examine
             ? theme->active
@@ -551,26 +728,28 @@ static void draw_edge_body(const Graph *graph, size_t edge_index, int active,
     Vector2 end = graph->directed ? edge_body_arrow_endpoint(geometry.end,
                                                              geometry.end_direction)
                                   : geometry.end;
+#ifdef GRAPHE_GLOW
     Vector2 glow_end = graph->directed ? edge_glow_arrow_endpoint(
                                              geometry.end, geometry.end_direction)
                                        : end;
 
     if (active_examine) draw_edge_glow(geometry, glow_end, theme->active);
+#endif
     draw_edge_path(geometry, end, 2.5f, color);
 }
 
 static void draw_edge_arrow(const Graph *graph, size_t edge_index,
-                            int active_examine, const Theme *theme,
-                            const RenderOptions *options) {
-    EdgeGeometry geometry =
-        make_edge_geometry(graph, edge_index, active_examine, options);
+                            EdgeGeometry geometry, int active_examine,
+                            const Theme *theme, const RenderOptions *options) {
     Color color =
         active_examine
             ? theme->active
             : edge_render_color(theme, graph->edges[edge_index].type, options);
 
+#ifdef GRAPHE_GLOW
     if (active_examine)
         draw_arrowhead_glow(geometry.end, geometry.end_direction, theme->active);
+#endif
     draw_arrowhead(geometry.end, geometry.end_direction, color);
 }
 
@@ -609,6 +788,7 @@ static void draw_level_label(const RenderResources *resources, const Node *node,
               15.0f, color);
 }
 
+#ifdef GRAPHE_GLOW
 static void draw_node_glow(Vector2 center, Color color) {
     const float inner_radii[] = {
         GRAPHE_NODE_RADIUS + 1.0f,
@@ -630,25 +810,35 @@ static void draw_node_glow(Vector2 center, Color color) {
         DrawRing(center, inner_radii[i], outer_radii[i], 0, 360, 64, glow);
     }
 }
+#endif
 
+/*
+ * Draws node fill, label, and mode-specific secondary text. The color selection
+ * lives here because DFS, BFS, and tree mode intentionally emphasize different
+ * state on the same Graph data.
+ */
 static void draw_node(const RenderResources *resources, const Node *node, int active,
-                      const Theme *theme, const RenderOptions *options,
-                      int max_level) {
+                      const Theme *theme, const RenderOptions *options) {
+	(void)active;
     Vector2 center = {node->x, node->y};
     bool show_times = options->algorithm_mode == ALGORITHM_DFS;
     bool show_level = options->algorithm_mode == ALGORITHM_BFS;
-    Color fill = show_level ? bfs_level_fill_color(theme, node, max_level)
-                            : node_fill_color(theme, node->color);
+    bool show_tree_output = options->algorithm_mode == ALGORITHM_TREE;
+    Color fill = show_level         ? bfs_level_fill_color(theme, node)
+                 : show_tree_output ? tree_node_fill_color(theme, node)
+                                    : node_fill_color(theme, node->color);
     Color outline = theme->node_outline;
-    Color label_color = show_level                  ? node_text_color(fill)
-                        : node->color == NODE_BLACK ? RAYWHITE
-                                                    : (Color){0, 0, 0, 255};
+    Color label_color = show_level || show_tree_output ? node_text_color(fill)
+                        : node->color == NODE_BLACK    ? RAYWHITE
+                                                       : (Color){0, 0, 0, 255};
     Color time_color = label_color;
     Vector2 label_size = measure_text(resources, node->label, 24.0f);
 
     time_color.a = 220;
 
+#ifdef GRAPHE_GLOW
     if (active) draw_node_glow(center, theme->active);
+#endif
     DrawCircleV(center, GRAPHE_NODE_RADIUS, fill);
     DrawRing(center, GRAPHE_NODE_RADIUS - 1.8f, GRAPHE_NODE_RADIUS, 0, 360, 64,
              outline);
@@ -1151,6 +1341,11 @@ static RenderUiResult draw_settings(RenderResources *resources,
     return result;
 }
 
+/*
+ * Rebuilds the word-pattern background as an opaque texture. Baking the theme
+ * background into the texture avoids double-applying alpha when the cache is
+ * drawn back to the frame.
+ */
 static void rebuild_graph_word_background(RenderResources *resources,
                                           const RenderOptions *options,
                                           const Theme *theme, int width,
@@ -1211,6 +1406,10 @@ static void rebuild_graph_word_background(RenderResources *resources,
     EndTextureMode();
 }
 
+/*
+ * Keeps the cached background in sync with the area that will draw it. The cache
+ * is shared by graph and settings views, so callers pass the target size.
+ */
 static void ensure_graph_word_background(RenderResources *resources,
                                          const RenderOptions *options,
                                          const Theme *theme, int width, int height) {
@@ -1418,6 +1617,10 @@ static RenderUiResult draw_sidebar(const Graph *graph, const Trace *trace,
     return result;
 }
 
+/*
+ * Top-level draw pass for the application. Edges and arrowheads are drawn before
+ * nodes so nodes stay on top; sidebar/settings UI is drawn after the graph scene.
+ */
 RenderUiResult render_graph(const Graph *graph, const Trace *trace,
                             size_t applied_event_count, RenderResources *resources,
                             RenderOptions *options, const Camera2D *camera) {
@@ -1425,7 +1628,6 @@ RenderUiResult render_graph(const Graph *graph, const Trace *trace,
     Theme theme = theme_for_options(options);
     size_t active_index =
         applied_event_count == 0 ? trace->count : applied_event_count - 1;
-    int bfs_max_level = max_bfs_trace_level(trace);
 
     apply_gui_style(resources, options, &theme);
 
@@ -1446,19 +1648,19 @@ RenderUiResult render_graph(const Graph *graph, const Trace *trace,
 
     for (size_t i = 0; i < graph->edge_count; i++) {
         if (!graph_edge_is_visible(graph, (int)i)) continue;
-        draw_edge_body(graph, i, is_active_edge(graph, trace, active_index, i),
-                       is_active_examine_edge(graph, trace, active_index, i), &theme,
-                       options);
+        int active_edge = is_active_edge(graph, trace, active_index, i);
+        int active_examine = is_active_examine_edge(graph, trace, active_index, i);
+        EdgeGeometry geometry =
+            make_edge_geometry(resources, graph, i, active_edge, options);
+
+        draw_edge_body(graph, i, geometry, active_examine, &theme, options);
         if (graph->directed)
-            draw_edge_arrow(graph, i,
-                            is_active_examine_edge(graph, trace, active_index, i),
-                            &theme, options);
+            draw_edge_arrow(graph, i, geometry, active_examine, &theme, options);
     }
 
     for (size_t i = 0; i < graph->node_count; i++)
         draw_node(resources, &graph->nodes[i],
-                  is_active_node(trace, active_index, i), &theme, options,
-                  bfs_max_level);
+                  is_active_node(trace, active_index, i), &theme, options);
 
     EndMode2D();
     EndScissorMode();

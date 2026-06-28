@@ -22,6 +22,8 @@ typedef enum LayoutMode {
     LAYOUT_MANUAL
 } LayoutMode;
 
+typedef struct EdgeCurveCacheEntry EdgeCurveCacheEntry;
+
 typedef struct RenderOptions {
     bool dark_mode;
     bool settings_open;
@@ -47,6 +49,8 @@ typedef struct RenderResources {
     int graph_background_height;
     bool graph_background_dark_mode;
     float graph_background_ui_scale;
+    EdgeCurveCacheEntry *edge_curve_cache;
+    size_t edge_curve_cache_capacity;
 } RenderResources;
 
 typedef struct RenderUiResult {
@@ -58,6 +62,7 @@ typedef struct RenderUiResult {
 
 void render_resources_load(RenderResources *resources);
 void render_resources_unload(RenderResources *resources);
+void render_clear_edge_curve_cache(RenderResources *resources);
 
 RenderUiResult render_update_options(RenderOptions *options);
 RenderUiResult render_graph(const Graph *graph, const Trace *trace,

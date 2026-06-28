@@ -136,6 +136,11 @@ static bool tree_id_map_add(TreeIdMap *map, const char *id, int node) {
     return true;
 }
 
+/*
+ * Tree files use stable IDs for edges and separate display values for nodes.
+ * This lets a node print arbitrary text while edges still reference compact,
+ * unambiguous identifiers.
+ */
 static bool add_tree_node(Graph *graph, TreeIdMap *map, const char *id,
                           const char *value, char *error, size_t error_size,
                           int line_number) {
@@ -172,6 +177,10 @@ static int require_tree_node(const TreeIdMap *map, const char *id, char *error,
     return node;
 }
 
+/*
+ * Validates the imported tree as a rooted directed tree: exactly one root, one
+ * parent per non-root node, and all nodes reachable from that root.
+ */
 static bool validate_tree_file(const Graph *graph, char *error, size_t error_size) {
     if (graph->node_count == 0) {
         set_error(error, error_size, "tree file contains no nodes", 0);
@@ -255,6 +264,11 @@ static bool validate_tree_file(const Graph *graph, char *error, size_t error_siz
     return true;
 }
 
+/*
+ * Loads both graph and tree .graphe files into the shared Graph structure. The
+ * function builds into a temporary graph first, then swaps it into the output
+ * only after the file has parsed and validated successfully.
+ */
 bool graph_load_from_file(const char *path, Graph *graph, char *error,
                           size_t error_size, GraphFileKind *kind) {
     FILE *file = fopen(path, "r");

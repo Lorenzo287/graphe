@@ -88,6 +88,11 @@ static void append_child(ForestLayoutState *state, int parent, int child) {
     state->child_counts[parent]++;
 }
 
+/*
+ * Derives a forest from EDGE_TREE classification events instead of from raw
+ * graph edges. That keeps the layout aligned with what the current traversal is
+ * teaching, even when the graph has many non-tree edges.
+ */
 static void build_forest_from_trace(const Graph *graph, const Trace *trace,
                                     ForestLayoutState *state) {
     for (size_t i = 0; i < trace->count; i++) {
@@ -119,6 +124,10 @@ static void build_forest_from_trace(const Graph *graph, const Trace *trace,
     }
 }
 
+/*
+ * Counts leaves in each traversal subtree so horizontal space can be allocated
+ * by visible breadth rather than by raw node count.
+ */
 static int measure_subtree(int node, ForestLayoutState *state) {
     int leaves = 0;
 
@@ -143,6 +152,11 @@ static float node_jitter(int node, int axis, float amount) {
     return (((float)value / 1023.0f) - 0.5f) * amount;
 }
 
+/*
+ * Places one measured subtree in its horizontal slot. The small deterministic
+ * jitter keeps large examples from looking perfectly mechanical without making
+ * the layout change between frames.
+ */
 static void place_subtree(Graph *graph, ForestLayoutState *state, int node,
                           int depth, float slot_width, float level_gap, float left,
                           float top, float *cursor) {
@@ -172,6 +186,11 @@ static void place_subtree(Graph *graph, ForestLayoutState *state, int node,
     *cursor += subtree_width - child_leaves * slot_width;
 }
 
+/*
+ * Main traversal-forest layout entry point. It falls back to a circular layout
+ * when no tree edges are available, which covers empty or not-yet-classified
+ * traces.
+ */
 void layout_trace_forest(Graph *graph, const Trace *trace, float left, float top,
                          float width, float level_gap) {
     if (graph->node_count == 0) return;

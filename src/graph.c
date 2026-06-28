@@ -37,6 +37,10 @@ void graph_init(Graph *graph) {
     graph->edge_capacity = 0;
 }
 
+/*
+ * Releases every owned allocation in the graph. Node labels are owned by the
+ * graph, so any copied or imported graph must be freed through this function.
+ */
 void graph_free(Graph *graph) {
     for (size_t i = 0; i < graph->node_count; i++) free(graph->nodes[i].label);
 
@@ -50,6 +54,11 @@ void graph_free(Graph *graph) {
     graph_init(graph);
 }
 
+/*
+ * Grows the node arrays together so every node-indexed side table stays aligned
+ * with Graph.nodes. Newly allocated slots are initialized as empty adjacency and
+ * alphabetical links.
+ */
 static bool graph_reserve_nodes(Graph *graph, size_t required) {
     if (required <= graph->node_capacity) return true;
 
@@ -102,6 +111,11 @@ static bool graph_reserve_edges(Graph *graph, size_t required) {
     return true;
 }
 
+/*
+ * Deep-copies graph structure, labels, adjacency links, and visual state. This
+ * is used when applying traces so the animated scene can be rebuilt without
+ * mutating the source graph.
+ */
 bool graph_copy(const Graph *source, Graph *out) {
     Graph copy;
     graph_init(&copy);
@@ -151,6 +165,10 @@ void graph_copy_node_positions(Graph *to, const Graph *from) {
     }
 }
 
+/*
+ * Checks only the structural identity needed to reuse an already-allocated scene
+ * graph: directedness, node labels, and physical edge endpoints.
+ */
 bool graph_structure_equals(const Graph *left, const Graph *right) {
     if (left->directed != right->directed) return false;
     if (left->node_count != right->node_count) return false;
@@ -184,6 +202,11 @@ static int node_follows_label_order(const Graph *graph, int left_node,
            0;
 }
 
+/*
+ * Maintains the node label ordering used by alphabetical traversal. This is kept
+ * separate from insertion order so the user can switch traversal order without
+ * rebuilding the graph.
+ */
 static void graph_link_node_by_label(Graph *graph, int node_index) {
     int current = graph->first_alpha_node;
 
@@ -307,6 +330,10 @@ static void graph_link_edge_by_insertion_order(Graph *graph, int node,
     graph->last_out[node] = edge_index;
 }
 
+/*
+ * Inserts an edge into the per-node alphabetical adjacency list. Undirected
+ * edges are linked from both endpoints, but still remain one physical Edge.
+ */
 static void graph_link_edge_by_target_label(Graph *graph, int node, int edge_index) {
     int current = graph->first_alpha_out[node];
 
@@ -328,6 +355,11 @@ static void graph_link_edge_by_target_label(Graph *graph, int node, int edge_ind
     set_edge_next_for_node(graph, current, node, edge_index, true);
 }
 
+/*
+ * Adds one physical edge and links it into all adjacency views. In undirected
+ * graphs this does not create a reverse edge; the same edge is reachable from
+ * both endpoints.
+ */
 int graph_add_edge(Graph *graph, int from, int to) {
     if (from < 0 || to < 0) return -1;
 
@@ -374,6 +406,10 @@ static bool graph_has_undirected_pair(const Graph *graph, int from, int to) {
     return false;
 }
 
+/*
+ * Builds the graph view shown by the app. Directed views preserve every source
+ * edge, while undirected views collapse reciprocal pairs into one physical edge.
+ */
 bool graph_build_view(const Graph *source, bool directed, Graph *out) {
     Graph view;
     graph_init(&view);
@@ -407,6 +443,10 @@ bool graph_build_view(const Graph *source, bool directed, Graph *out) {
     return true;
 }
 
+/*
+ * Clears only algorithm/animation state. Structure, labels, edge endpoints, and
+ * node positions are intentionally preserved between playback steps.
+ */
 void graph_reset_visual_state(Graph *graph) {
     for (size_t i = 0; i < graph->node_count; i++) {
         graph->nodes[i].discover_time = -1;

@@ -13,6 +13,8 @@
 #define GRAPHE_MIN_WINDOW_WIDTH 880
 #define GRAPHE_MIN_WINDOW_HEIGHT 560
 
+// #define GRAPHE_GLOW
+
 static int scaled_icon_value(int icon_size, float value) {
     int scaled = (int)(value * (float)icon_size / 64.0f + 0.5f);
     if (scaled < 1) scaled = 1;
@@ -159,6 +161,10 @@ static void reset_graph_camera(Camera2D *camera, const Graph *graph,
     camera->target.y = graph_center.y - canvas_center.y;
 }
 
+/*
+ * Applies the selected layout mode to the active base graph. Manual mode is a
+ * no-op so user-dragged node positions survive playback and redraws.
+ */
 static void apply_layout(Graph *graph, const Trace *trace,
                          const RenderOptions *options) {
     float graph_width = render_graph_area_width(options);
@@ -188,6 +194,10 @@ static Graph *active_base_graph(const RenderOptions *options, Graph *graph_view,
     return graph_view;
 }
 
+/*
+ * Rebuilds the algorithm trace for the current mode and clamps playback to the
+ * new trace length. Rendering later applies a prefix of this trace each frame.
+ */
 static void rebuild_trace(const Graph *base_graph, Trace *trace,
                           const RenderOptions *options, size_t *step) {
     TraversalOptions traversal_options = {
@@ -230,10 +240,18 @@ static void apply_layout_for_collapsed_graph(Graph *graph, const Trace *trace,
     apply_layout(graph, trace, options);
 }
 
+/*
+ * Window and UI-scale changes can change automatic layout geometry. Manual mode
+ * only recenters the camera, preserving user-adjusted node positions.
+ */
 static void refresh_layout_after_window_change(Graph *graph, const Trace *trace,
                                                const RenderOptions *options,
-                                               Camera2D *camera) {
-    if (options->layout_mode != LAYOUT_MANUAL) apply_layout(graph, trace, options);
+                                               Camera2D *camera,
+                                               RenderResources *render_resources) {
+    if (options->layout_mode != LAYOUT_MANUAL) {
+        apply_layout(graph, trace, options);
+        render_clear_edge_curve_cache(render_resources);
+    }
     reset_graph_camera(camera, graph, options);
 }
 
@@ -276,10 +294,15 @@ static void zoom_camera_at_mouse(Camera2D *camera, Vector2 mouse, float wheel) {
     camera->target.y += before.y - after.y;
 }
 
+/*
+ * Applies render/UI requests to graph state. This is the boundary where imports,
+ * directedness changes, trace rebuilds, layout changes, and render-cache
+ * invalidation are coordinated.
+ */
 static void apply_ui_result(RenderUiResult result, Graph *graph_source,
                             Graph *graph_view, Graph *tree_base, Trace *trace,
                             RenderOptions *options, size_t *step, Camera2D *camera,
-                            bool *playing) {
+                            bool *playing, RenderResources *render_resources) {
     if (result.graph_load_requested) {
         Graph loaded_graph;
         graph_init(&loaded_graph);
@@ -321,6 +344,7 @@ static void apply_ui_result(RenderUiResult result, Graph *graph_source,
             *step = 0;
             rebuild_trace(base_graph, trace, options, step);
             apply_layout(base_graph, trace, options);
+            render_clear_edge_curve_cache(render_resources);
             if (options->algorithm_mode != ALGORITHM_TREE)
                 graph_copy_node_positions(graph_source, graph_view);
             reset_graph_camera(camera, base_graph, options);
@@ -359,6 +383,7 @@ static void apply_ui_result(RenderUiResult result, Graph *graph_source,
     Graph *base_graph = active_base_graph(options, graph_view, tree_base);
 
     if (result.trace_changed) {
+        render_clear_edge_curve_cache(render_resources);
         rebuild_trace(base_graph, trace, options, step);
         *step = 0;
         if (graph_positions_collapsed(base_graph)) {
@@ -374,6 +399,7 @@ static void apply_ui_result(RenderUiResult result, Graph *graph_source,
 
     if (result.layout_changed) {
         apply_layout(base_graph, trace, options);
+        render_clear_edge_curve_cache(render_resources);
         reset_graph_camera(camera, base_graph, options);
         *playing = false;
         if (options->algorithm_mode != ALGORITHM_TREE)
@@ -457,7 +483,7 @@ int main(void) {
         RenderUiResult ui_result = render_update_options(&options);
 
         apply_ui_result(ui_result, &graph_base, &graph_view, &tree_base, &trace,
-                        &options, &step, &graph_camera, &playing);
+                        &options, &step, &graph_camera, &playing, &render_resources);
         if (native_style_dark_mode != options.dark_mode) {
             platform_window_apply_style(options.dark_mode);
             native_style_dark_mode = options.dark_mode;
@@ -479,7 +505,7 @@ int main(void) {
             if (scale_changed) {
                 base_graph = active_base_graph(&options, &graph_view, &tree_base);
                 refresh_layout_after_window_change(base_graph, &trace, &options,
-                                                   &graph_camera);
+                                                   &graph_camera, &render_resources);
             }
         }
 
@@ -492,7 +518,7 @@ int main(void) {
             window_height = current_window_height;
             base_graph = active_base_graph(&options, &graph_view, &tree_base);
             refresh_layout_after_window_change(base_graph, &trace, &options,
-                                               &graph_camera);
+                                               &graph_camera, &render_resources);
         }
 
         if (shortcuts_enabled && IsKeyPressed(KEY_SPACE)) playing = !playing;
@@ -517,6 +543,7 @@ int main(void) {
         if (shortcuts_enabled && IsKeyPressed(KEY_R)) {
             base_graph = active_base_graph(&options, &graph_view, &tree_base);
             apply_layout(base_graph, &trace, &options);
+            render_clear_edge_curve_cache(&render_resources);
             reset_graph_camera(&graph_camera, base_graph, &options);
             playing = false;
         }
@@ -587,7 +614,7 @@ int main(void) {
         EndDrawing();
 
         apply_ui_result(draw_result, &graph_base, &graph_view, &tree_base, &trace,
-                        &options, &step, &graph_camera, &playing);
+                        &options, &step, &graph_camera, &playing, &render_resources);
         if (native_style_dark_mode != options.dark_mode) {
             platform_window_apply_style(options.dark_mode);
             native_style_dark_mode = options.dark_mode;
