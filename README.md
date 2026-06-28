@@ -2,12 +2,11 @@
 
 > _γραφή_ (_graphê_): writing, drawing, a traced line.
 
-Graphe is a small C/raylib project for visualizing graph algorithms — DFS, BFS, and tree traversal — with color-coded nodes and edges and interactive playback.
+Graphe is a small C/raylib project for visualizing graph algorithms with color-coded operations and interactive playback. DFS, BFS, and tree traversal are supported.
 
 ## Build
 
 Requirements: CMake 3.20+ and a C99 compiler, Ninja is optional but recommended for speed.
-
 The default CMake setup fetches raygui and can fetch raylib when no system
 package is found.
 
